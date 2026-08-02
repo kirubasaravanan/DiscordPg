@@ -1,6 +1,6 @@
 # PG OS — API Specification
 
-Status: Phase 3a implemented — §4 (tenant self-service: `profile`, `rent` only), §5.1–§5.6 (Buildings, Rooms, Beds, Tenants, Allocations, Rent Ledger) are live under `backend/`, matching this document except where a "Phase 3a implementation note" below says otherwise. §5.7 onward (deposits, complaints, expenses, users, documents, dashboard/reports) and the rest of §4 are Phase 3b, not yet built — see [ROADMAP.md](ROADMAP.md). The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
+Status: Phase 3a and 3b implemented — everything in this document is live under `backend/` **except** §5.11 Documents and the documents portion of §4 (tenant self-service), which are Phase 3c, not yet built (needs real object-storage credentials this environment doesn't have — see [ROADMAP.md](ROADMAP.md)). The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
 
 ## Deviations from CLAUDE.md's literal endpoint list
 
@@ -212,7 +212,8 @@ Ending an allocation also flips the bed back to `VACANT` and, if the room had be
 | GET | `/api/v1/expenses` | OWNER, MANAGER | *(added)* |
 | POST | `/api/v1/expenses` | OWNER, MANAGER | *(added — Expense is a modeled entity with no endpoint in CLAUDE.md)* |
 | PATCH | `/api/v1/expenses/{id}` | OWNER, MANAGER | *(added)* |
-| DELETE | `/api/v1/expenses/{id}` | OWNER | *(added)* |
+
+**No `DELETE` endpoint** — corrected in Phase 3b. An earlier draft of this table had one, but that directly contradicted [DATABASE.md](DATABASE.md) §2's own append-only rule ("`rent_ledger`, `security_deposits`, `complaints`, `expenses`, `allocations` are never deleted, only status-transitioned, so history is always reconstructable"), which `expenses` is explicitly listed under. A mis-entered expense is corrected via `PATCH`, not removed.
 
 ### 5.10 Users (OWNER only)
 
@@ -246,6 +247,41 @@ Ending an allocation also flips the bed back to `VACANT` and, if the room had be
   "rent": { "collected_this_month": 189000.00, "pending_this_month": 21000.00, "overdue_count": 3 },
   "complaints": { "open": 5, "in_progress": 2, "urgent": 1 },
   "expenses": { "this_month": 42500.00 }
+}
+```
+
+`rent.collected_this_month`/`pending_this_month` are scoped to the current calendar month's `rent_ledger` rows; `rent.overdue_count` deliberately is not — it counts every `OVERDUE` row regardless of month, since a stale unpaid balance from any prior month still belongs on a "needs attention" dashboard. `complaints.urgent` counts `priority=URGENT` rows that are not `RESOLVED`/`CLOSED` — an urgent complaint that's already handled shouldn't show up as needing attention.
+
+**The three report response shapes below were designed during Phase 3b implementation** — this document originally specified only their paths and roles, not a body:
+
+`GET /api/v1/reports/income?months=6` (query param `months`, default 6, max 24) — trailing months oldest-first, each a net of rent collected vs. expenses recorded in that month:
+
+```json
+{
+  "rows": [
+    { "month": "2026-06-01", "rent_collected": 47500.00, "expenses": 0.00, "net": 47500.00 },
+    { "month": "2026-07-01", "rent_collected": 38000.00, "expenses": 21700.00, "net": 16300.00 }
+  ]
+}
+```
+
+`GET /api/v1/reports/occupancy` — one row per active room, complementing the dashboard's single aggregate number with a per-room breakdown:
+
+```json
+{
+  "rows": [
+    { "room_id": "...", "building_id": "...", "room_number": "101", "capacity": 2, "occupied_beds": 2, "status": "FULL" }
+  ]
+}
+```
+
+`GET /api/v1/reports/complaints` — category breakdown, sorted by total volume descending; `open_count` includes `OPEN`, `IN_PROGRESS`, and `REOPENED`:
+
+```json
+{
+  "by_category": [
+    { "category": "PLUMBING", "open_count": 2, "total_count": 5 }
+  ]
 }
 ```
 

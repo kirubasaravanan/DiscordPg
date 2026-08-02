@@ -98,9 +98,9 @@ def seed(db: Session | None = None) -> None:
         db.flush()
 
         staff_users = [
-            User(email="owner@pgos.local", password_hash=hash_password(SEED_PASSWORDS[UserRole.OWNER]), role=UserRole.OWNER),
-            User(email="manager@pgos.local", password_hash=hash_password(SEED_PASSWORDS[UserRole.MANAGER]), role=UserRole.MANAGER),
-            User(email="staff@pgos.local", password_hash=hash_password(SEED_PASSWORDS[UserRole.STAFF]), role=UserRole.STAFF),
+            User(email="owner@example.com", password_hash=hash_password(SEED_PASSWORDS[UserRole.OWNER]), role=UserRole.OWNER),
+            User(email="manager@example.com", password_hash=hash_password(SEED_PASSWORDS[UserRole.MANAGER]), role=UserRole.MANAGER),
+            User(email="staff@example.com", password_hash=hash_password(SEED_PASSWORDS[UserRole.STAFF]), role=UserRole.STAFF),
         ]
         db.add_all(staff_users)
 
@@ -226,7 +226,7 @@ def seed(db: Session | None = None) -> None:
         )
         print("Dev login credentials (local/dev only):")
         for role, password in SEED_PASSWORDS.items():
-            email = tenant_user.email if role is UserRole.TENANT else f"{role.value.lower()}@pgos.local"
+            email = tenant_user.email if role is UserRole.TENANT else f"{role.value.lower()}@example.com"
             print(f"  {role.value:<8} {email:<28} {password}")
     finally:
         if owns_session:

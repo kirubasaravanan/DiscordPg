@@ -23,6 +23,17 @@ class TenantUpdate(BaseModel):
     status: TenantStatus | None = None
 
 
+class TenantSelfUpdate(BaseModel):
+    """What a tenant may change about their own profile — no status,
+    joining_date, or exit_date; those are staff-managed lifecycle fields,
+    not contact details. See app/api/routers/tenant_self.py.
+    """
+
+    phone: str | None = Field(None, min_length=7, max_length=20)
+    email: EmailStr | None = None
+    emergency_contact: str | None = Field(None, max_length=20)
+
+
 class TenantRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

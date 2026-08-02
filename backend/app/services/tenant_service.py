@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import conflict, not_found
 from app.models import Allocation, Tenant
-from app.schemas.tenant import TenantCreate, TenantUpdate
+from app.schemas.tenant import TenantCreate, TenantSelfUpdate, TenantUpdate
 
 
 def list_tenants(db: Session, *, limit: int, offset: int) -> tuple[list[Tenant], int]:
@@ -35,6 +35,16 @@ def update_tenant(db: Session, tenant_id: uuid.UUID, payload: TenantUpdate, acto
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(tenant, field, value)
     tenant.updated_by = actor_id
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+def update_own_profile(db: Session, tenant: Tenant, payload: TenantSelfUpdate) -> Tenant:
+    """Self-service update — no separate actor_id: the tenant is always the actor."""
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(tenant, field, value)
+    tenant.updated_by = tenant.user_id
     db.commit()
     db.refresh(tenant)
     return tenant

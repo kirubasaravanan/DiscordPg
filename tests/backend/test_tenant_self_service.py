@@ -65,3 +65,24 @@ def test_tenant_cannot_see_another_tenants_rent(client, db_session, tenant_with_
     assert resp.status_code == 200
     assert resp.json()["items"] == []
     assert resp.json()["total"] == 0
+
+
+def test_update_own_profile(client, tenant_with_user):
+    tenant, user = tenant_with_user
+    resp = client.patch(
+        "/api/v1/tenant/profile", json={"phone": "9555500001", "emergency_contact": "9555599999"}, headers=auth_headers(user)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["phone"] == "9555500001"
+    assert body["emergency_contact"] == "9555599999"
+    assert body["name"] == tenant.name  # unaffected
+
+
+def test_update_own_profile_cannot_set_status(client, tenant_with_user):
+    _, user = tenant_with_user
+    resp = client.patch("/api/v1/tenant/profile", json={"status": "EXITED"}, headers=auth_headers(user))
+    # status isn't a field on TenantSelfUpdate at all — the extra key is silently ignored by
+    # Pydantic's default config, not rejected; assert it had no effect rather than assuming 422.
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ACTIVE"

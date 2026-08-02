@@ -1,6 +1,6 @@
 # PG OS — Development Roadmap
 
-Status: Phase 3a (Backend — Auth, Buildings, Rooms, Beds, Tenants, Allocations, Rent Ledger) complete. Expands CLAUDE.md's "Development Roadmap (Phase Prompts)" into concrete deliverables, dependencies, and definitions of done. No calendar estimates are given here — this project has no tracked velocity yet to base one on; size phases relatively instead (S/M/L) if planning is needed.
+Status: Phase 3a and 3b complete — every backend resource except Documents (Phase 3c). Expands CLAUDE.md's "Development Roadmap (Phase Prompts)" into concrete deliverables, dependencies, and definitions of done. No calendar estimates are given here — this project has no tracked velocity yet to base one on; size phases relatively instead (S/M/L) if planning is needed.
 
 ## Guiding Principles
 
@@ -47,7 +47,7 @@ From CLAUDE.md:
 
 ## Phase 3 — Backend
 
-Scope is split, as this entry's original wording allowed for. **Phase 3a (this phase)** covers everything needed for the core tenant lifecycle — sign in, house someone, bill them — end to end with real RBAC. Everything financial/communication-adjacent beyond rent (deposits, complaints, expenses, documents) or purely administrative (full user management, dashboard/reports) moves to **Phase 3b**, a follow-up, so it can get the same depth of test coverage without this phase sprawling further.
+Scope is split into three, as this entry's original wording allowed for. **Phase 3a** covers everything needed for the core tenant lifecycle — sign in, house someone, bill them — end to end with real RBAC. **Phase 3b** covers everything else that's pure database CRUD/aggregation with no external dependency. **Phase 3c** is Documents alone, split out separately because it's the one piece that genuinely needs infrastructure (object storage credentials) this environment doesn't have.
 
 ### Phase 3a — Auth, core resources, allocation, rent (done)
 
@@ -62,13 +62,30 @@ Scope is split, as this entry's original wording allowed for. **Phase 3a (this p
 
 **Definition of done:** every endpoint implemented in this phase matches its [API.md](API.md) entry (path, roles, request/response shape) or `docs/API.md` is updated to match reality — confirmed; RBAC is enforced as a dependency, not ad hoc per-handler checks — confirmed, `require_roles(...)` in `app/api/deps.py`; allocating/ending an allocation keeps `beds.status`/`rooms.status` consistent with actual occupancy — confirmed by test and by hand against the live seeded server. Also fixed along the way: `SessionLocal` had `autoflush=False` since Phase 2, which silently produced stale reads for exactly this kind of "modify then query in the same transaction" logic — changed to the default (`True`).
 
-**Explicitly deferred to Phase 3b:** Security Deposits, Complaints, Expenses, Documents endpoints; full Users CRUD (`POST`/`PATCH /api/v1/users`) — Phase 3a only re-hashes the Phase 2 seed accounts, it doesn't add a way to create new ones via the API; Dashboard/Reports endpoints; the remaining tenant self-service surface (`PATCH /tenant/profile`, complaints, documents).
+**Explicitly deferred:** Security Deposits, Complaints, Expenses, full Users CRUD, Dashboard/Reports, and the rest of tenant self-service to Phase 3b; Documents (both admin and tenant-facing) to Phase 3c.
 
-### Phase 3b — Remaining resources (not started)
+### Phase 3b — Remaining resources except Documents (done)
 
-**Deliverables:** the endpoint groups listed as deferred above, per [API.md](API.md) §5.7–5.12 and the rest of §4, with the same test-coverage bar as 3a.
+Scope narrowed again on entry, same reasoning as the 3a/3b split: Documents specifically needs real Cloudflare R2/S3 credentials to build a pre-signed-upload flow that's actually been proven to work, not just written — this environment has none. Splitting it out rather than stubbing it keeps everything else in 3b honestly tested. See [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 12.
+
+**Deliverables:**
+- Security Deposits — full CRUD per [API.md](API.md) §5.7 (OWNER/MANAGER only, no STAFF read — narrower than every other resource so far).
+- Expenses — CRUD per [API.md](API.md) §5.9, **minus** the `DELETE` endpoint that table originally listed (see [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 10 — it contradicted `expenses`' own append-only rule in [DATABASE.md](DATABASE.md) §2).
+- Users — full CRUD per [API.md](API.md) §5.10, OWNER-only, reusing the Phase 3a password-hashing module. Added a guard (§12 item 13) so the last active `OWNER` account can't be demoted or deactivated via the API.
+- Complaints — admin list/get/patch per [API.md](API.md) §5.8, plus the tenant-facing `POST`/`GET /api/v1/tenant/complaints` from §4. No AI classifier yet (Phase 6) — interim placeholder design, see [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 11.
+- `PATCH /api/v1/tenant/profile` — the one remaining piece of tenant self-service with no external dependency.
+- Dashboard (`GET /api/v1/dashboard`) and Reports (`GET /api/v1/reports/{income,occupancy,complaints}`) per [API.md](API.md) §5.12 — the first endpoints that read across multiple resource types at once; their response shapes were designed during this phase (§12 item 14) and are now documented in [API.md](API.md) §5.12.
+- 138 tests total, same coverage bar as 3a: happy path + at least one failure path per endpoint, RBAC per role, run against real PostgreSQL. Dashboard/report aggregation math verified against a hand-built exact scenario, then against the real Phase 2 seed data by hand (every number checked out).
+
+**Bug found by smoke-testing against the real seeded server, not just the test suite:** the seed script's `owner@pgos.local`/`manager@pgos.local`/`staff@pgos.local` addresses (Phase 2) fail `EmailStr` validation — `.local` is a reserved TLD — so creating a similarly-shaped new user through the real `POST /api/v1/users` correctly got rejected. The automated tests never caught this because they generate throwaway emails on `@example.com`. The seed data only "worked" because it's inserted directly through the ORM, bypassing Pydantic entirely. Fixed by switching the seed script's staff emails to `@example.com`, matching what the tenant seed data already used.
 
 **Depends on:** Phase 3a (reuses its auth/RBAC/error-envelope scaffolding directly).
+
+### Phase 3c — Documents (not started)
+
+**Deliverables:** `documents` CRUD per [API.md](API.md) §5.11 and the tenant-facing document endpoints from §4, backed by real pre-signed upload/download URLs against Cloudflare R2 (or S3-compatible storage) per [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 — not a stub.
+
+**Depends on:** Phase 3a. Blocked on real object-storage credentials being available to develop and test against (may end up sequenced alongside or after Phase 7's storage configuration work, whichever comes first).
 
 **Depends on:** Phase 2.
 

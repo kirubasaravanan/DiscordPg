@@ -5,7 +5,21 @@ from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.errors import APIError
-from app.api.routers import allocations, auth, beds, buildings, rent_ledger, rooms, tenant_self, tenants
+from app.api.routers import (
+    allocations,
+    auth,
+    beds,
+    buildings,
+    complaints,
+    dashboard,
+    expenses,
+    rent_ledger,
+    rooms,
+    security_deposits,
+    tenant_self,
+    tenants,
+    users,
+)
 
 app = FastAPI(title="PG OS API", version="0.1.0")
 
@@ -16,6 +30,11 @@ app.include_router(beds.router, prefix="/api/v1/beds", tags=["beds"])
 app.include_router(tenants.router, prefix="/api/v1/tenants", tags=["tenants"])
 app.include_router(allocations.router, prefix="/api/v1/allocations", tags=["allocations"])
 app.include_router(rent_ledger.router, prefix="/api/v1/rent", tags=["rent"])
+app.include_router(security_deposits.router, prefix="/api/v1/deposits", tags=["deposits"])
+app.include_router(expenses.router, prefix="/api/v1/expenses", tags=["expenses"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(complaints.router, prefix="/api/v1/complaints", tags=["complaints"])
+app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard", "reports"])
 app.include_router(tenant_self.router, prefix="/api/v1/tenant", tags=["tenant-self-service"])
 
 
