@@ -367,6 +367,7 @@ Maintain under `docs/`:
 - `ARCHITECTURE.md`
 - `DATABASE.md`
 - `API.md`
+- `ROADMAP.md`
 - `AI_DESIGN.md`
 - `DEPLOYMENT.md`
 - `CHANGELOG.md`
