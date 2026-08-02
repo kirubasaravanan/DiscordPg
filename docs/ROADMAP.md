@@ -98,13 +98,21 @@ Unblocked without waiting for real object-storage credentials: asked how to proc
 
 **Depends on:** Phase 2.
 
-## Phase 4 — Dashboard
+## Phase 4 — Dashboard (done)
+
+Built as its own `uv`-managed project under `dashboard/`, with no PostgreSQL driver in its dependencies at all — "no view queries Postgres directly" is enforced by the dependency graph, not just convention.
 
 **Deliverables:**
-- Streamlit app (`dashboard/`) authenticating against the Phase 3 API (no direct DB access — per [ARCHITECTURE.md](ARCHITECTURE.md) §4.2).
-- Occupancy, rent, complaint, and expense views, each backed by the corresponding `/api/v1/...` endpoints.
+- `dashboard/app.py` — Streamlit entrypoint, JWT-authenticated against `POST /api/v1/auth/login`, multi-page navigation via `st.navigation`. `api_client.py` retries once on a `401` using the refresh token before forcing a re-login.
+- Role-based page visibility: Occupancy/Rent/Complaints are registered for OWNER, MANAGER, and STAFF alike; Expenses only for OWNER/MANAGER, matching [API.md](API.md) §3's RBAC matrix. Confirmed this is a real access boundary, not just a hidden sidebar link — see [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 19.
+- **Occupancy** — KPI tiles + an occupancy meter (all staff); a per-room stacked bar chart (Plotly, dataviz-skill-validated palette) and status table (OWNER/MANAGER only).
+- **Rent** — KPI tiles and the ledger table (all staff, read-only for STAFF); a 6-month income-vs-expenses trend chart and an inline "record payment" action per row (OWNER/MANAGER only, matching `WRITE_ROLES` in `app/api/routers/rent_ledger.py`).
+- **Complaints** — KPI tiles and the triage queue with an inline status/priority "update" action, open to all three staff roles (matching `UPDATE_ROLES` — STAFF can triage tickets); a by-category breakdown chart is OWNER/MANAGER only.
+- **Expenses** — KPI tile, 6-month trend chart (reusing the income report's `expenses` series), a client-side category breakdown (pandas groupby — no dedicated report endpoint exists for this), a recent-expenses table, and an add-expense form. OWNER/MANAGER only, enforced by omitting the page from STAFF's navigation entirely.
+- `tests/dashboard/` — 25 tests using `streamlit.testing.v1.AppTest` against the real running backend, no mocks: login (valid/invalid/tenant-rejected), role-based page visibility, and per-view in-page gating, with rendered values cross-checked against the same data fetched directly from the API inside the test rather than hardcoded expected numbers.
+- Every write path (record payment, update complaint, add expense) additionally verified by hand in a real headless browser (Playwright) end-to-end against the live backend — before/after screenshots and direct API reads confirming the mutation actually persisted, not just that the UI showed a success message.
 
-**Definition of done:** all four views render live data from a running backend; no view queries Postgres directly.
+**Definition of done:** all four views render live data from a running backend; no view queries Postgres directly — met.
 
 **Depends on:** Phase 3 (needs the dashboard/reports and resource-listing endpoints).
 

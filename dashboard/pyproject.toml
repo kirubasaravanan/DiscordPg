@@ -1,0 +1,26 @@
+[project]
+name = "pgos-dashboard"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.2",
+    "plotly>=5.24",
+    "python-dotenv>=1.0",
+    "requests>=2.32",
+    "streamlit>=1.38",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.pytest.ini_options]
+# Tests live in the top-level tests/ directory (docs/ARCHITECTURE.md §13
+# repo mapping), not inside dashboard/, but they import the dashboard's
+# bare-name local modules (api_client, auth, ui, config) the same way
+# Streamlit itself does when it runs app.py — pythonpath makes that resolve
+# when pytest is run from here (dashboard/), matching backend/pyproject.toml.
+pythonpath = ["."]
+testpaths = ["../tests/dashboard"]
