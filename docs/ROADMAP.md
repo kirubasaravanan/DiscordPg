@@ -1,6 +1,6 @@
 # PG OS — Development Roadmap
 
-Status: Phase 3a and 3b complete — every backend resource except Documents (Phase 3c). Expands CLAUDE.md's "Development Roadmap (Phase Prompts)" into concrete deliverables, dependencies, and definitions of done. No calendar estimates are given here — this project has no tracked velocity yet to base one on; size phases relatively instead (S/M/L) if planning is needed.
+Status: Phase 3 complete in full (3a, 3b, 3c) — every backend resource in [API.md](API.md), including Documents. Expands CLAUDE.md's "Development Roadmap (Phase Prompts)" into concrete deliverables, dependencies, and definitions of done. No calendar estimates are given here — this project has no tracked velocity yet to base one on; size phases relatively instead (S/M/L) if planning is needed.
 
 ## Guiding Principles
 
@@ -81,11 +81,20 @@ Scope narrowed again on entry, same reasoning as the 3a/3b split: Documents spec
 
 **Depends on:** Phase 3a (reuses its auth/RBAC/error-envelope scaffolding directly).
 
-### Phase 3c — Documents (not started)
+### Phase 3c — Documents (done)
 
-**Deliverables:** `documents` CRUD per [API.md](API.md) §5.11 and the tenant-facing document endpoints from §4, backed by real pre-signed upload/download URLs against Cloudflare R2 (or S3-compatible storage) per [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 — not a stub.
+Unblocked without waiting for real object-storage credentials: asked how to proceed given none were available, and built a `StorageBackend` abstraction (`backend/app/storage/`) instead of stubbing or waiting — a fully-tested local filesystem backend plus a standard boto3 S3/R2-compatible backend, so the real credentials (whenever they arrive) are a configuration change (`STORAGE_BACKEND=s3` + bucket/endpoint), not a rewrite.
 
-**Depends on:** Phase 3a. Blocked on real object-storage credentials being available to develop and test against (may end up sequenced alongside or after Phase 7's storage configuration work, whichever comes first).
+**Deliverables:**
+- `documents` CRUD per [API.md](API.md) §5.11 and the tenant-facing document endpoints from §4 — upload-url request, confirm/register, list, download-url, admin verify.
+- Real pre-signed upload/download URL mechanics per [ARCHITECTURE.md](ARCHITECTURE.md) §4.6, not a stub: the local backend's tokens are genuinely signed and time-limited (reusing Phase 3a's JWT infrastructure) and genuinely consumed over real HTTP by this same app's `/internal/storage/*` routes.
+- The S3/R2 backend follows boto3's standard presigned-URL pattern; verified with `moto` (in-process AWS mock) as far as this environment allows — see [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 15 for exactly what was and wasn't verified, and why.
+- 22 new tests (13 storage backend, 8 documents endpoints, 1 config-validation), full suite now 157, all passing against real PostgreSQL. The documents test suite includes one true end-to-end lifecycle test (request upload URL → PUT real bytes → confirm → list → download → byte-compare → admin verify) plus a second hand-run smoke test against a live server writing to a real temp directory on disk.
+- `docs/API.md` updated for the upload-url/download-url endpoints, which weren't specified beforehand; noticed and flagged (not fixed, low priority) that `GET /api/v1/tenant/rent/{rent_id}` from the original §4 table was never actually built in Phase 3a.
+
+**Definition of done:** a tenant can request an upload URL, actually upload a file, confirm it, and later actually download the same bytes back — confirmed twice, once in the automated suite and once by hand against a running server with `STORAGE_BACKEND=local`. A malicious/mistaken confirm (nothing uploaded yet, or someone else's storage key) is rejected with a clear `400`, not silently accepted.
+
+**Depends on:** Phase 3a.
 
 **Depends on:** Phase 2.
 

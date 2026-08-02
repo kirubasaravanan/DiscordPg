@@ -1,6 +1,6 @@
 # PG OS — System Architecture
 
-Status: Phase 2 (Database) and Phase 3a+3b (Backend — everything except Documents, deferred to Phase 3c) implemented under `backend/`. This was originally a Phase 1 (Architecture-only) document; §7, §12, and §13 below now also record where implementation confirmed or corrected the original design — see [DATABASE.md](DATABASE.md) and [API.md](API.md) for the fuller implementation notes.
+Status: Phase 2 (Database) and all of Phase 3 (Backend — 3a, 3b, and 3c) implemented under `backend/`. This was originally a Phase 1 (Architecture-only) document; §4.6, §7, §12, and §13 below now also record where implementation confirmed or corrected the original design — see [DATABASE.md](DATABASE.md) and [API.md](API.md) for the fuller implementation notes.
 
 ## 1. Overview
 
@@ -102,6 +102,10 @@ Single relational store for all operational data. See [DATABASE.md](DATABASE.md)
 
 - Holds tenant documents (ID proofs, agreements, photos).
 - Backend issues short-lived pre-signed upload/download URLs; clients (dashboard, bot-driven flows) upload directly to storage, then confirm completion to the backend, which records `storage_url` and `verification_status`. The backend never proxies file bytes through itself.
+- **Implemented (Phase 3c) behind a `StorageBackend` protocol** (`backend/app/storage/base.py`) so `document_service.py` never knows which concrete backend is active:
+  - **Local filesystem** (`app/storage/local.py`) — the default, for dev/test. Not a fake stand-in: "presigned URLs" are real, working signed-token-scoped links back to this same app's own `/internal/storage/*` routes, so upload/download genuinely round-trips real bytes through real HTTP, verified end-to-end in tests and by hand against a live server.
+  - **S3-compatible** (`app/storage/s3.py`) — real Cloudflare R2 or AWS S3 via boto3's standard `generate_presigned_url`. Selected via `STORAGE_BACKEND=s3`; `STORAGE_S3_ENDPOINT_URL` + `STORAGE_S3_REGION=auto` is what targets R2 instead of AWS (Cloudflare's own documented approach). Not verified against a live bucket — see §12 item 15.
+- `STORAGE_LOCAL_BASE_URL` must match wherever the server is actually reachable from the client's perspective (default `http://localhost:8000` assumes the conventional dev port) — found by smoke-testing on a non-default port and getting a silent connection failure until it was corrected.
 
 ## 5. Layering & Dependency Rules
 
@@ -211,6 +215,9 @@ These are architectural decisions made to keep the spec complete and buildable. 
 12. **Documents endpoints are deferred to a new Phase 3c, not built in Phase 3b.** [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 calls for pre-signed R2/S3 upload URLs, which needs real object-storage credentials to build and verify honestly — this environment has none. Building it against a fake/local stand-in would produce code that's never actually been proven to work against real storage, which is worse than not building it yet. See [ROADMAP.md](ROADMAP.md).
 13. **The system can never end up with zero active `OWNER` accounts via the API.** Not requested by CLAUDE.md, but a natural consequence of Users being `OWNER`-only (§5.10): if the last owner could demote or deactivate themselves (or another owner) with no owner left, nobody could use the Users API to fix it again — an unrecoverable lockout short of direct database access. `PATCH /api/v1/users/{id}` rejects (`409`) any role-change-away-from-`OWNER` or `is_active=false` that would leave zero other active owners. See `app/services/user_service.py`.
 14. **Dashboard/report response shapes were designed during Phase 3b, not specified beforehand.** [API.md](API.md) §5.12 originally gave the dashboard's shape but only named the three report endpoints' paths and roles. Designed and documented in [API.md](API.md) §5.12 alongside implementation.
+15. **The S3/R2 backend's presigned URLs are not verified against a live bucket or through an external HTTP client.** No real Cloudflare/AWS credentials exist in this environment (§12 item 12 explains why Documents was split into its own phase over this). What *was* verified, using `moto` (an in-process AWS mock) with real `boto3` calls: bucket-config validation raises a clear error when misconfigured; `object_exists()` correctly reflects real (mocked) bucket state after a direct `put_object`/delete; `generate_upload_target()`/`generate_download_url()` produce well-formed URLs referencing the correct bucket and key. What wasn't verified: actually consuming a generated presigned URL via a plain HTTP client (`httpx`) — tried directly, and this sandbox's own outbound `HTTPS_PROXY` intercepts the request to `*.amazonaws.com` before moto's interception applies, producing an unrelated 403. This is specific to this sandboxed environment, not a defect in the presigned-URL code, which follows boto3's standard, well-documented pattern.
+16. **The local storage backend's "presigned URLs" are a genuine, working mechanism, not a stub** — signed, time-limited, single-key-scoped tokens (reusing the JWT infrastructure from Phase 3a, `StorageTokenAction` in `app/security/jwt.py`) consumed by this same app's own `/internal/storage/{key}` routes (mounted only when `STORAGE_BACKEND=local`). Verified with real HTTP PUT/GET through them, including rejecting a token used for the wrong action, the wrong key, or after expiry.
+17. **A document's `storage_key` is validated to actually belong to the confirming tenant** (`app/services/document_service.py`) before a `POST /api/v1/tenant/documents` is accepted — not just that *something* was uploaded to it. Since keys are server-generated as `tenants/{tenant_id}/{uuid4()}`, a 128-bit-random key isn't practically guessable, but checking the prefix costs nothing and closes the gap outright rather than relying on that being merely impractical.
 
 ## 13. Repository-to-Architecture Mapping
 
@@ -221,6 +228,7 @@ These are architectural decisions made to keep the spec complete and buildable. 
 | `backend/app/models/`, `backend/app/database/` | Database layer |
 | `backend/app/security/` | AuthN/AuthZ |
 | `backend/app/schemas/` | Request/response contracts |
+| `backend/app/storage/` | Object storage abstraction (§4.6) — not in the original Phase 1 mapping, added in Phase 3c |
 | `discord_bot/` | Client — Discord surface |
 | `dashboard/` | Client — admin surface |
 | `ai_engine/` | AI layer (isolated, no DB access) |

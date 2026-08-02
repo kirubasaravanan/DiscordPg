@@ -15,6 +15,9 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Local storage backend (docs/ARCHITECTURE.md §4.6) — dev/test data only
+storage_data/
+
 # OS / editor
 .DS_Store
 .vscode/

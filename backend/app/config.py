@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +15,25 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
+
+    # Storage backend (docs/ARCHITECTURE.md §4.6) — "local" for dev (default,
+    # no external dependency), "s3" for Cloudflare R2 / AWS S3 in production.
+    storage_backend: Literal["local", "s3"] = "local"
+    storage_presigned_url_expire_seconds: int = 900
+
+    # Local backend only.
+    storage_local_path: str = "./storage_data"
+    storage_local_base_url: str = "http://localhost:8000"
+
+    # S3/R2-compatible backend only — all optional since they're unused in
+    # local mode. storage_s3_endpoint_url is what makes this work against R2
+    # instead of real AWS: set it to the R2 account endpoint and region to
+    # "auto"; leave both unset (the boto3 default) for real AWS S3.
+    storage_s3_bucket: str | None = None
+    storage_s3_endpoint_url: str | None = None
+    storage_s3_region: str = "auto"
+    storage_s3_access_key_id: str | None = None
+    storage_s3_secret_access_key: str | None = None
 
 
 @lru_cache

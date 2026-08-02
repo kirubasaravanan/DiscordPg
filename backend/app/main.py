@@ -12,6 +12,7 @@ from app.api.routers import (
     buildings,
     complaints,
     dashboard,
+    documents,
     expenses,
     rent_ledger,
     rooms,
@@ -20,6 +21,7 @@ from app.api.routers import (
     tenants,
     users,
 )
+from app.config import get_settings
 
 app = FastAPI(title="PG OS API", version="0.1.0")
 
@@ -35,7 +37,16 @@ app.include_router(expenses.router, prefix="/api/v1/expenses", tags=["expenses"]
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(complaints.router, prefix="/api/v1/complaints", tags=["complaints"])
 app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard", "reports"])
+app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
 app.include_router(tenant_self.router, prefix="/api/v1/tenant", tags=["tenant-self-service"])
+
+if get_settings().storage_backend == "local":
+    # Only meaningful with the local backend — S3/R2 clients upload/download
+    # directly against the bucket, never through this API. See
+    # app/storage/local.py / app/api/routers/internal_storage.py.
+    from app.api.routers import internal_storage
+
+    app.include_router(internal_storage.router, prefix="/internal/storage", tags=["internal-storage"])
 
 
 @app.exception_handler(APIError)

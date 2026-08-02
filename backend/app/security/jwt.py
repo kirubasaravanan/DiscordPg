@@ -13,6 +13,17 @@ class TokenType(str, Enum):
     REFRESH = "refresh"
 
 
+class StorageTokenAction(str, Enum):
+    """Distinct from TokenType — these scope a token to one storage key and
+    one action, not a user identity. Used by the local storage backend's
+    internal upload/download routes as a genuine (if homegrown) analog of an
+    S3 presigned URL's signature. See app/storage/local.py.
+    """
+
+    UPLOAD = "storage_upload"
+    DOWNLOAD = "storage_download"
+
+
 class TokenError(Exception):
     """Raised for any missing, malformed, expired, or wrong-type token.
 
@@ -61,3 +72,29 @@ def decode_token(token: str) -> dict[str, Any]:
         return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError as exc:
         raise TokenError(str(exc)) from exc
+
+
+def create_storage_token(storage_key: str, action: StorageTokenAction, expire_seconds: int) -> str:
+    settings = get_settings()
+    now = _now()
+    payload = {
+        "key": storage_key,
+        "action": action.value,
+        "iat": now,
+        "exp": now + datetime.timedelta(seconds=expire_seconds),
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_storage_token(token: str, expected_action: StorageTokenAction) -> str:
+    """Returns the storage_key the token was scoped to. Raises TokenError if
+    the token is invalid/expired (via decode_token) or wasn't issued for
+    `expected_action` — a download token can't be replayed as an upload one.
+    """
+    payload = decode_token(token)
+    if payload.get("action") != expected_action.value:
+        raise TokenError(f"Token is not valid for {expected_action.value}.")
+    key = payload.get("key")
+    if not key:
+        raise TokenError("Token is missing its storage key.")
+    return key

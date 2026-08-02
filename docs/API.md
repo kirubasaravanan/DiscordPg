@@ -1,6 +1,6 @@
 # PG OS — API Specification
 
-Status: Phase 3a and 3b implemented — everything in this document is live under `backend/` **except** §5.11 Documents and the documents portion of §4 (tenant self-service), which are Phase 3c, not yet built (needs real object-storage credentials this environment doesn't have — see [ROADMAP.md](ROADMAP.md)). The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
+Status: Phases 3a, 3b, and 3c all implemented — every backend endpoint in this document is live under `backend/`, with one gap noted inline (§4: `GET /api/v1/tenant/rent/{rent_id}` was never built). Documents (§5.11 and the documents portion of §4) ship with a local-filesystem storage backend by default and an R2/S3-compatible backend available via configuration — see [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 and §12. The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
 
 ## Deviations from CLAUDE.md's literal endpoint list
 
@@ -88,11 +88,13 @@ All endpoints under `/api/v1/tenant/*` implicitly scope to the authenticated `TE
 | GET | `/api/v1/tenant/profile` | `GET /tenant/profile` | Own profile. |
 | PATCH | `/api/v1/tenant/profile` | *(added)* | Update own contact info (phone, email, emergency contact). |
 | GET | `/api/v1/tenant/rent` | `GET /tenant/rent` | Own rent ledger history. |
-| GET | `/api/v1/tenant/rent/{rent_id}` | *(added)* | Single rent ledger entry. |
+| GET | ~~`/api/v1/tenant/rent/{rent_id}`~~ | *(added, not implemented)* | Single rent ledger entry — noticed missing while documenting Phase 3c; low-priority since the list endpoint already returns every field. Not built. |
 | POST | `/api/v1/tenant/complaints` | `POST /tenant/complaint` | File a complaint. |
 | GET | `/api/v1/tenant/complaints` | *(added)* | List own complaints + status. |
-| GET | `/api/v1/tenant/documents` | *(added)* | List own documents. |
-| POST | `/api/v1/tenant/documents` | *(added)* | Register an uploaded document (after pre-signed upload — see [ARCHITECTURE.md](ARCHITECTURE.md) §4.6). |
+| POST | `/api/v1/tenant/documents/upload-url` | *(added — Phase 3c)* | Get a pre-signed upload URL + `storage_key` for a new document. |
+| POST | `/api/v1/tenant/documents` | *(added)* | Confirm/register a document after uploading to the URL above. |
+| GET | `/api/v1/tenant/documents` | *(added)* | List own documents (metadata only — no `storage_url`). |
+| GET | `/api/v1/tenant/documents/{id}/download-url` | *(added — Phase 3c)* | Get a fresh pre-signed download URL for one of your own documents. |
 
 `POST /api/v1/tenant/complaints` request/response:
 
@@ -111,7 +113,43 @@ All endpoints under `/api/v1/tenant/*` implicitly scope to the authenticated `TE
 }
 ```
 
-`category` and `priority` are filled in by the AI classifier server-side (see [ARCHITECTURE.md](ARCHITECTURE.md) §6.1) — the tenant never supplies them.
+`category` and `priority` are filled in by the AI classifier server-side (see [ARCHITECTURE.md](ARCHITECTURE.md) §6.1) — the tenant never supplies them. **As of Phase 3c, that classifier still doesn't exist (Phase 6)**: `category` defaults to `OTHER` (or the tenant's own suggestion, if given), `priority` always starts `MEDIUM` — see [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 11.
+
+**Document upload flow** (Phase 3c), matching the pre-signed URL pattern from [ARCHITECTURE.md](ARCHITECTURE.md) §4.6:
+
+```json
+// 1. POST /api/v1/tenant/documents/upload-url — request: empty body. Response:
+{
+  "storage_key": "tenants/<tenant_id>/<uuid>",
+  "upload_url": "https://...",
+  "method": "PUT",
+  "expires_in": 900
+}
+
+// 2. Client PUTs the file's raw bytes directly to upload_url. No further API call needed for that step.
+
+// 3. POST /api/v1/tenant/documents — request:
+{ "document_type": "ID_PROOF", "storage_key": "tenants/<tenant_id>/<uuid>" }
+// Response 201: a DocumentRead (below). 400 if nothing was actually uploaded to that key yet.
+
+// GET /api/v1/tenant/documents/{id}/download-url — response:
+{ "download_url": "https://...", "expires_in": 900 }
+```
+
+`DocumentRead` shape (admin `GET /api/v1/documents` returns the same shape):
+
+```json
+{
+  "id": "...",
+  "tenant_id": "...",
+  "document_type": "ID_PROOF",
+  "verification_status": "PENDING",
+  "created_at": "2026-08-02T14:30:00Z",
+  "updated_at": null
+}
+```
+
+`storage_url`/`storage_key` is deliberately never returned in a document's own read shape — it's an internal key, not something a client uses directly. Get a fresh, time-limited download URL from the dedicated endpoint instead.
 
 ## 5. Admin APIs
 
@@ -228,7 +266,10 @@ Ending an allocation also flips the bed back to `VACANT` and, if the room had be
 | Method | Path | Roles | CLAUDE.md source |
 |---|---|---|---|
 | GET | `/api/v1/documents` | OWNER, MANAGER, STAFF (read) | *(added)* |
+| GET | `/api/v1/documents/{id}/download-url` | OWNER, MANAGER, STAFF | *(added — Phase 3c; staff can't verify a document they have no way to actually view)* |
 | PATCH | `/api/v1/documents/{id}/verify` | OWNER, MANAGER | *(added — set verification_status)* |
+
+Response shapes match the tenant-facing ones in §4 (`DocumentRead`, `DownloadURLResponse`) — this is the same `documents` table, just an admin-wide view instead of scoped to one tenant.
 
 ### 5.12 Dashboard & Reports
 
