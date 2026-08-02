@@ -1,6 +1,6 @@
 # PG OS — Development Roadmap
 
-Status: Phase 1 (Architecture) deliverable. Expands CLAUDE.md's "Development Roadmap (Phase Prompts)" into concrete deliverables, dependencies, and definitions of done. No calendar estimates are given here — this project has no tracked velocity yet to base one on; size phases relatively instead (S/M/L) if planning is needed.
+Status: Phase 2 (Database) complete. Expands CLAUDE.md's "Development Roadmap (Phase Prompts)" into concrete deliverables, dependencies, and definitions of done. No calendar estimates are given here — this project has no tracked velocity yet to base one on; size phases relatively instead (S/M/L) if planning is needed.
 
 ## Guiding Principles
 
@@ -17,7 +17,7 @@ From CLAUDE.md:
 **Deliverable:** `CLAUDE.md` at repo root.
 **Status:** Complete.
 
-## Phase 1 — Architecture (this phase)
+## Phase 1 — Architecture (done)
 
 **Deliverables:**
 - `docs/ARCHITECTURE.md`
@@ -31,17 +31,17 @@ From CLAUDE.md:
 
 **Depends on:** Phase 0.
 
-## Phase 2 — Database
+## Phase 2 — Database (done)
 
 **Deliverables:**
-- SQLAlchemy models for every entity in [DATABASE.md](DATABASE.md) §4, including the added `users` table.
-- Alembic setup + initial migration(s) matching the schema, constraints, and indexes documented there.
-- Database connection/session management (`backend/app/database/`).
-- Seed data script per [DATABASE.md](DATABASE.md) §9.
-- Unit/database tests (`pytest`) covering models, constraints (e.g. the partial-unique active-allocation index), and seed script idempotency.
-- Update `docs/DATABASE.md` if implementation surfaces anything the design missed.
+- SQLAlchemy models for every entity in [DATABASE.md](DATABASE.md) §4, including the added `users` table — `backend/app/models/`.
+- Alembic setup + initial migration matching the schema, constraints, and indexes documented there — `backend/alembic/`.
+- Database connection/session management — `backend/app/database/connection.py`, `backend/app/config.py`.
+- Seed data script per [DATABASE.md](DATABASE.md) §9 — `backend/app/database/seed.py` (path corrected from the original top-level `database/seed.py` plan; see [ARCHITECTURE.md](ARCHITECTURE.md) §12).
+- 21 unit/database tests (`pytest`, top-level `tests/backend/`) covering relationships, every unique/check constraint, the partial-unique active-allocation index, native-enum enforcement at the DB level, and seed script correctness + idempotency. All passing against a real PostgreSQL 16 instance.
+- `docs/DATABASE.md` and `docs/ARCHITECTURE.md` updated for what implementation corrected: no `pgcrypto` extension needed (core PG13+ `gen_random_uuid()`), the seed script path, and an Alembic gotcha (enum types orphaned on downgrade unless dropped explicitly) documented for future migrations to follow.
 
-**Definition of done:** `alembic upgrade head` produces a schema matching `docs/DATABASE.md` exactly; seed script runs cleanly against an empty database; tests pass in CI/locally via Docker Compose Postgres.
+**Definition of done:** `alembic upgrade head` produces a schema matching `docs/DATABASE.md` exactly (confirmed via `alembic check`); `alembic downgrade base` cleanly reverses it with no orphaned objects (confirmed via `\dT`) and a subsequent `upgrade head` succeeds; seed script runs cleanly against an empty database and no-ops on a second run; all tests pass locally against PostgreSQL 16. Docker Compose parity (running the same against the Phase 7 `docker-compose.yml` Postgres service) is deferred to Phase 7 — no docker-compose.yml exists yet.
 
 **Depends on:** Phase 1 (schema must be settled, especially the flagged assumptions — UUID PKs, `users` table, enum values).
 
@@ -115,15 +115,15 @@ Per CLAUDE.md's "Future goal" — not built now, but the design should not activ
 - React frontend (Streamlit is the v1 dashboard).
 - Online rent payment processing (v1 tracks rent, it doesn't move money — see [ARCHITECTURE.md](ARCHITECTURE.md) §12).
 
-## Open Decisions to Confirm Before Phase 2
+## Open Decisions
 
-Carried forward from [ARCHITECTURE.md](ARCHITECTURE.md) §12 so they're visible in the roadmap too:
+Carried forward from [ARCHITECTURE.md](ARCHITECTURE.md) §12. Items 2 and 3 are now locked in by the Phase 2 schema/migration — changing them after this point means a new migration against real data, not a documentation edit. Items 1, 4, and 5 are still genuinely open and should be confirmed before Phase 3 code makes them harder to change:
 
-1. Rent collection stays a tracking ledger, not a payment gateway integration — confirm.
-2. `users` table addition and its relationship to `tenants` — confirm shape.
-3. UUID primary keys over auto-increment integers — confirm, since it's a schema-wide choice that's expensive to reverse post-Phase-2.
-4. Pluralized/versioned API paths that expand on CLAUDE.md's literal endpoint list — confirm before Phase 3 locks them into code and Discord/dashboard clients.
-5. Pre-signed URL upload pattern for documents — confirm Cloudflare R2 is the actual target (affects whether this pattern needs adjustment).
+1. Rent collection stays a tracking ledger, not a payment gateway integration — **still open**, confirm before Phase 3.
+2. `users` table addition and its relationship to `tenants` — **implemented** (Phase 2: `backend/app/models/user.py`, `tenant.py`).
+3. UUID primary keys over auto-increment integers — **implemented** (Phase 2, all 11 tables).
+4. Pluralized/versioned API paths that expand on CLAUDE.md's literal endpoint list — **still open**, confirm before Phase 3 locks them into code and Discord/dashboard clients.
+5. Pre-signed URL upload pattern for documents — **still open**, confirm Cloudflare R2 is the actual target (affects whether this pattern needs adjustment). Not touched by Phase 2 — `documents.storage_url` is just a `TEXT` column regardless of how it gets populated.
 
 ## See Also
 

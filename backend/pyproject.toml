@@ -1,0 +1,26 @@
+[project]
+name = "pgos-backend"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-dotenv>=1.0",
+    "sqlalchemy>=2.0.36",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+]
+
+[tool.pytest.ini_options]
+# Tests live in the top-level tests/ directory (docs/ARCHITECTURE.md §13
+# repo mapping), not inside backend/, but they import the `app` package —
+# pythonpath makes that resolve when pytest is run from here (backend/).
+pythonpath = ["."]
+testpaths = ["../tests/backend"]

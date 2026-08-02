@@ -1,6 +1,6 @@
 # PG OS — System Architecture
 
-Status: Phase 1 (Architecture) deliverable. No application code exists yet — this document defines what Phase 2 onward will build.
+Status: Phase 2 (Database) implemented under `backend/`. This was originally a Phase 1 (Architecture-only) document; §12 and §13 below now also record where implementation confirmed or corrected the original design — see [DATABASE.md](DATABASE.md) for the full implementation notes.
 
 ## 1. Overview
 
@@ -196,11 +196,13 @@ Becoming a true multi-tenant SaaS (multiple unrelated PG *businesses* on shared 
 
 These are architectural decisions made to keep the spec complete and buildable. Flagging them here so they can be corrected before Phase 2 turns them into schema/code:
 
-1. **Rent collection is tracked, not processed.** CLAUDE.md's stack has no payment gateway. This design assumes rent is collected offline (cash/UPI/bank transfer) and recorded into `rent_ledger` by staff or the tenant reporting it — PG OS does not move money. If online payment collection is actually required, that's a new component (payment gateway integration) not currently in scope.
-2. **A `User`/auth entity is added.** CLAUDE.md's Database Design section doesn't list a users table, but JWT auth + RBAC requires one. `users` is added with a nullable link from `tenants.user_id` (a tenant may or may not have portal/bot login access) — see [DATABASE.md](DATABASE.md).
-3. **Primary keys are UUIDs, not auto-increment integers** — chosen for non-enumerable tenant-facing IDs and to avoid ID collisions if multiple PGs' data is ever merged under the future SaaS model. See [DATABASE.md](DATABASE.md) §2 for the full rationale.
-4. **API paths are pluralized and versioned** (`/api/v1/tenants`, not `/tenant`) to follow REST convention, formalizing the illustrative endpoints listed in CLAUDE.md. See [API.md](API.md) for the mapping.
-5. **Document uploads use pre-signed URLs** rather than the backend proxying file bytes.
+1. **Rent collection is tracked, not processed.** CLAUDE.md's stack has no payment gateway. This design assumes rent is collected offline (cash/UPI/bank transfer) and recorded into `rent_ledger` by staff or the tenant reporting it — PG OS does not move money. If online payment collection is actually required, that's a new component (payment gateway integration) not currently in scope. *(Still open — unaffected by Phase 2.)*
+2. **A `User`/auth entity is added.** CLAUDE.md's Database Design section doesn't list a users table, but JWT auth + RBAC requires one. `users` is added with a nullable link from `tenants.user_id` (a tenant may or may not have portal/bot login access) — see [DATABASE.md](DATABASE.md). *(Implemented in Phase 2 as designed.)*
+3. **Primary keys are UUIDs, not auto-increment integers** — chosen for non-enumerable tenant-facing IDs and to avoid ID collisions if multiple PGs' data is ever merged under the future SaaS model. See [DATABASE.md](DATABASE.md) §2 for the full rationale. *(Implemented in Phase 2 as designed.)*
+4. **API paths are pluralized and versioned** (`/api/v1/tenants`, not `/tenant`) to follow REST convention, formalizing the illustrative endpoints listed in CLAUDE.md. See [API.md](API.md) for the mapping. *(Still open — not yet implemented; Phase 3.)*
+5. **Document uploads use pre-signed URLs** rather than the backend proxying file bytes. *(Still open — not yet implemented; Phase 3.)*
+6. **No `pgcrypto` extension needed, contrary to what Phase 1 assumed.** [DATABASE.md](DATABASE.md) §1 originally said UUID generation required the `pgcrypto` extension. Verified empirically against Postgres 16: `gen_random_uuid()` is a core built-in function since PostgreSQL 13, present with zero extensions installed. Corrected in [DATABASE.md](DATABASE.md) §1 — the initial migration does not create any extension.
+7. **The seed script lives at `backend/app/database/seed.py`, not top-level `database/seed.py`.** The original Phase 1 mapping (§13 below) put it outside the `backend` package, which would have required cross-package `PYTHONPATH` tricks for no real benefit. Corrected in [DATABASE.md](DATABASE.md) §9.
 
 ## 13. Repository-to-Architecture Mapping
 
@@ -214,7 +216,7 @@ These are architectural decisions made to keep the spec complete and buildable. 
 | `discord_bot/` | Client — Discord surface |
 | `dashboard/` | Client — admin surface |
 | `ai_engine/` | AI layer (isolated, no DB access) |
-| `database/` | Raw SQL / seed / reference scripts (Phase 2) |
+| `database/` | Reserved for raw SQL / reference artifacts (e.g. a schema dump) if a future phase needs one — not used by Phase 2. The seed script lives at `backend/app/database/seed.py` instead (see [DATABASE.md](DATABASE.md) §9); this folder does not exist yet. |
 | `docs/` | This documentation set |
 | `tests/` | Unit, API, and database tests |
 | `docker/` | Container definitions |

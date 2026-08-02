@@ -1,13 +1,13 @@
 # PG OS — Database Design
 
-Status: Phase 1 (Architecture) deliverable. Defines the schema Phase 2 will implement as SQLAlchemy models + Alembic migrations. No migrations exist yet.
+Status: Phase 2 (Database) implemented — SQLAlchemy models, initial Alembic migration, connection module, and seed script all exist under `backend/`. This document has been updated to match; see the "Phase 2 implementation notes" callouts below for anything that changed from the original Phase 1 design.
 
 ## 1. Overview
 
-- Engine: PostgreSQL
-- ORM: SQLAlchemy (Phase 2)
-- Migrations: Alembic (Phase 2) — schema changes only ever happen through a migration, never a manual `ALTER TABLE` against a live database
-- Extension required: `pgcrypto` (for `gen_random_uuid()`) and, from Phase 6 onward, `pgvector` (for AI FAQ retrieval)
+- Engine: PostgreSQL (developed/tested against 16)
+- ORM: SQLAlchemy 2.0 (`backend/app/models/`)
+- Migrations: Alembic (`backend/alembic/`) — schema changes only ever happen through a migration, never a manual `ALTER TABLE` against a live database
+- Extensions: none required for the schema itself — `gen_random_uuid()` has been a core PostgreSQL 13+ function since PG13, not a `pgcrypto`-only function as originally assumed in Phase 1 (verified directly: it works on a fresh database with zero extensions installed). `pgvector` remains a real, separate future requirement for Phase 6 (AI/RAG).
 
 ## 2. Conventions
 
@@ -318,19 +318,28 @@ These are proposed defaults, not fixed by CLAUDE.md (which named the `status` fi
 
 ## 8. Migration Strategy (Alembic)
 
-- One migration per logical schema change; autogenerate from models, then hand-review before committing (autogenerate misses some constraints, e.g. partial unique indexes and enum value changes).
+- One migration per logical schema change; autogenerate from models (`uv run alembic revision --autogenerate -m "..."` from `backend/`), then hand-review before committing.
 - Migration file names: `<revision>_<snake_case_description>.py` (Alembic default).
-- Seed/reference data (e.g., a default `OWNER` user) is applied via a separate seed script (`database/seed.py`, Phase 2), not baked into migrations — migrations define structure, seeding defines starting data, and the two should be runnable independently.
+- Seed/reference data (e.g., a default `OWNER` user) is applied via a separate seed script, not baked into migrations — migrations define structure, seeding defines starting data, and the two run independently.
 - No migration is ever edited after it has been applied to a shared environment; a mistake gets a new corrective migration.
 
-## 9. Seed Data Plan (detailed in Phase 2)
+**Phase 2 implementation notes — things autogenerate gets wrong, confirmed by actually running the upgrade/downgrade cycle against Postgres 16:**
 
-For local/dev environments only:
+- **Partial unique indexes** (e.g. `uq_allocations_active_bed` on `allocations (bed_id) WHERE end_date IS NULL`) *are* picked up correctly by autogenerate — confirmed via `pg_indexes` after running the migration — but verify this by hand for every migration that touches one; it's dialect-specific behavior, not something to assume holds in general.
+- **Enum types are not dropped when their table is dropped.** `op.drop_table()` has no knowledge of the `sa.Enum` columns the table used, so a generated `downgrade()` leaves every Postgres `ENUM` type orphaned — confirmed by running `upgrade` → `downgrade` → inspecting `\dT`, which showed all 12 enum types still present with no tables referencing them. A second `upgrade` then fails with `type already exists`. The fix (applied by hand in the initial migration) is an explicit loop of `op.execute(f"DROP TYPE IF EXISTS {enum_name}")` for every enum, placed after the `drop_table` calls in `downgrade()`. Every future migration that adds a new enum type needs the same treatment in its `downgrade()`.
+
+## 9. Seed Data Plan
+
+Implemented at `backend/app/database/seed.py` (run via `uv run python -m app.database.seed` from `backend/`) — **not** at a top-level `database/seed.py` as originally planned in Phase 1. That path would have needed `backend/` on `PYTHONPATH` for a script outside the `backend/` package to import `app.models`/`app.database.connection`, which is unnecessary friction for no benefit; keeping the seed script inside the `backend` package it seeds means it shares the same environment, dependencies, and import root as everything else. See the corresponding correction in [ARCHITECTURE.md](ARCHITECTURE.md) §13.
+
+Covers, for local/dev environments only:
 
 - One `buildings` row.
-- ~5 `rooms` with `beds` to exercise capacity/occupancy logic without needing all 30/70.
-- A handful of `tenants` with `allocations`, at least one with a `rent_ledger` history including a `PARTIAL` and an `OVERDUE` row, so dashboard views have something to render.
-- One `users` row per role (`OWNER`, `MANAGER`, `STAFF`, `TENANT`) for auth testing.
+- 5 `rooms` (12 `beds` total) to exercise capacity/occupancy logic without needing all 30/70.
+- 6 `tenants`, 5 with `allocations` (one left unallocated to exercise that state too) — including `rent_ledger` history that covers all four `payment_status` values (`PAID`, `PARTIAL`, `PENDING`, `OVERDUE`), plus a `security_deposit` per allocated tenant.
+- A few `complaints` (`OPEN`, `IN_PROGRESS`, `RESOLVED`) and `expenses`, so every dashboard view (Phase 4) has something to render, not just rent.
+- One `users` row per role (`OWNER`, `MANAGER`, `STAFF`, `TENANT`) for auth testing, with the `TENANT`-role user linked to a seeded tenant via `user_id`.
+- Safe to re-run: no-ops if a `Building` already exists rather than duplicating rows.
 
 ## See Also
 
