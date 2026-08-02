@@ -1,6 +1,6 @@
 # PG OS — Database Design
 
-Status: Phase 2 (Database) implemented — SQLAlchemy models, initial Alembic migration, connection module, and seed script all exist under `backend/`. This document has been updated to match; see the "Phase 2 implementation notes" callouts below for anything that changed from the original Phase 1 design.
+Status: Phase 2 (Database) implemented, plus one Phase 3a addition (`users.token_version`, §4.1). Two migrations exist under `backend/alembic/versions/`: the initial schema, and a follow-up adding `token_version`. This document has been updated to match; see the "implementation notes" callouts below for anything that changed from the original Phase 1 design.
 
 ## 1. Overview
 
@@ -144,10 +144,11 @@ Added beyond CLAUDE.md's explicit entity list — required to back JWT auth + RB
 | id | UUID | PK | |
 | email | VARCHAR(255) | UNIQUE, NOT NULL | Login identifier for staff/owner. |
 | phone | VARCHAR(20) | UNIQUE, NULL | |
-| password_hash | VARCHAR(255) | NOT NULL | bcrypt/argon2 — finalized in Phase 3. |
+| password_hash | VARCHAR(255) | NOT NULL | Argon2id (`argon2-cffi`) — decided in Phase 3a, OWASP's current recommended default; a 97-character encoded hash comfortably fits `VARCHAR(255)`. |
 | role | ENUM `user_role` | NOT NULL | `OWNER`, `MANAGER`, `STAFF`, `TENANT`. |
 | discord_id | VARCHAR(32) | UNIQUE, NULL | Links a Discord account to a PG OS user for bot commands. |
 | is_active | BOOLEAN | NOT NULL DEFAULT true | Deactivate without deleting. |
+| token_version | INTEGER | NOT NULL DEFAULT 0 | **Added in Phase 3a**, beyond the original Phase 1 design — not requested by CLAUDE.md or planned in this document before implementation. `POST /api/v1/auth/logout` requires *some* server-side state to actually invalidate a refresh token (a bare JWT can't be revoked by itself); bumping this column invalidates every refresh token issued for that user before the bump. See [ARCHITECTURE.md](ARCHITECTURE.md) §7 and `backend/app/security/jwt.py`. |
 
 ### 4.2 `buildings` (soft-delete: yes)
 

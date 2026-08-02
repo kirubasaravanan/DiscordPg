@@ -1,6 +1,6 @@
 # PG OS — System Architecture
 
-Status: Phase 2 (Database) implemented under `backend/`. This was originally a Phase 1 (Architecture-only) document; §12 and §13 below now also record where implementation confirmed or corrected the original design — see [DATABASE.md](DATABASE.md) for the full implementation notes.
+Status: Phase 2 (Database) and Phase 3a (Backend — Auth, Buildings, Rooms, Beds, Tenants, Allocations, Rent Ledger) implemented under `backend/`. This was originally a Phase 1 (Architecture-only) document; §7, §12, and §13 below now also record where implementation confirmed or corrected the original design — see [DATABASE.md](DATABASE.md) and [API.md](API.md) for the fuller implementation notes.
 
 ## 1. Overview
 
@@ -158,9 +158,10 @@ sequenceDiagram
 
 ## 7. Authentication & Authorization
 
-- **AuthN:** JWT access tokens (short-lived) + refresh tokens (longer-lived), issued by `security/`. Passwords hashed with a modern algorithm (bcrypt/argon2 — finalized in Phase 3).
-- **AuthZ:** Role-based access control with four roles: `OWNER`, `MANAGER`, `STAFF`, `TENANT`. Every API router declares the minimum role required per endpoint; the security layer enforces it as a FastAPI dependency, not as ad-hoc checks inside handlers. Full permission matrix in [API.md](API.md).
-- A `TENANT`-role token is additionally scoped to that tenant's own `tenant_id` — tenant self-service endpoints filter by the authenticated tenant, never by a client-supplied ID.
+- **AuthN:** JWT access tokens (15 min, `app/security/jwt.py`) + refresh tokens (30 days), issued by `security/`. Passwords hashed with Argon2id (`argon2-cffi`) — decided in Phase 3a as OWASP's current recommended default, over bcrypt/passlib (passlib has known version-detection issues with modern bcrypt releases).
+- **AuthZ:** Role-based access control with four roles: `OWNER`, `MANAGER`, `STAFF`, `TENANT`. Every API router declares the minimum role required per endpoint via the `require_roles(...)` dependency factory (`app/api/deps.py`); the security layer enforces it as a FastAPI dependency, not as ad-hoc checks inside handlers. Full permission matrix in [API.md](API.md).
+- A `TENANT`-role token is additionally scoped to that tenant's own `tenant_id` via the `get_current_tenant` dependency — tenant self-service endpoints filter by the authenticated tenant, never by a client-supplied ID. A `TENANT`-role user with no linked `tenants` row (`tenants.user_id`) gets `403`, not a crash.
+- **Logout / revocation:** JWTs are stateless by design, so "logging out" can't just mean "the client forgets the token" if a leaked refresh token should also stop working. `POST /api/v1/auth/logout` bumps `users.token_version` (Phase 3a addition, see [DATABASE.md](DATABASE.md) §4.1); every refresh token embeds the version it was issued under, and `POST /api/v1/auth/refresh` rejects a mismatch. Access tokens are not similarly checked — their 15-minute lifetime is the accepted exposure window, checking token_version on every request would mean a DB lookup per request for no real benefit.
 
 ## 8. Configuration & Secrets
 
@@ -199,10 +200,12 @@ These are architectural decisions made to keep the spec complete and buildable. 
 1. **Rent collection is tracked, not processed.** CLAUDE.md's stack has no payment gateway. This design assumes rent is collected offline (cash/UPI/bank transfer) and recorded into `rent_ledger` by staff or the tenant reporting it — PG OS does not move money. If online payment collection is actually required, that's a new component (payment gateway integration) not currently in scope. *(Still open — unaffected by Phase 2.)*
 2. **A `User`/auth entity is added.** CLAUDE.md's Database Design section doesn't list a users table, but JWT auth + RBAC requires one. `users` is added with a nullable link from `tenants.user_id` (a tenant may or may not have portal/bot login access) — see [DATABASE.md](DATABASE.md). *(Implemented in Phase 2 as designed.)*
 3. **Primary keys are UUIDs, not auto-increment integers** — chosen for non-enumerable tenant-facing IDs and to avoid ID collisions if multiple PGs' data is ever merged under the future SaaS model. See [DATABASE.md](DATABASE.md) §2 for the full rationale. *(Implemented in Phase 2 as designed.)*
-4. **API paths are pluralized and versioned** (`/api/v1/tenants`, not `/tenant`) to follow REST convention, formalizing the illustrative endpoints listed in CLAUDE.md. See [API.md](API.md) for the mapping. *(Still open — not yet implemented; Phase 3.)*
-5. **Document uploads use pre-signed URLs** rather than the backend proxying file bytes. *(Still open — not yet implemented; Phase 3.)*
+4. **API paths are pluralized and versioned** (`/api/v1/tenants`, not `/tenant`) to follow REST convention, formalizing the illustrative endpoints listed in CLAUDE.md. See [API.md](API.md) for the mapping. *(Implemented in Phase 3a as designed, for every resource group built so far.)*
+5. **Document uploads use pre-signed URLs** rather than the backend proxying file bytes. *(Still open — Documents endpoints are Phase 3b.)*
 6. **No `pgcrypto` extension needed, contrary to what Phase 1 assumed.** [DATABASE.md](DATABASE.md) §1 originally said UUID generation required the `pgcrypto` extension. Verified empirically against Postgres 16: `gen_random_uuid()` is a core built-in function since PostgreSQL 13, present with zero extensions installed. Corrected in [DATABASE.md](DATABASE.md) §1 — the initial migration does not create any extension.
 7. **The seed script lives at `backend/app/database/seed.py`, not top-level `database/seed.py`.** The original Phase 1 mapping (§13 below) put it outside the `backend` package, which would have required cross-package `PYTHONPATH` tricks for no real benefit. Corrected in [DATABASE.md](DATABASE.md) §9.
+8. **`Room.status = FULL` and `Bed.status = OCCUPIED` are treated as derived, not staff-editable.** Neither CLAUDE.md nor the Phase 1 docs said so explicitly, but once the allocation service (Phase 3a) is the thing that's supposed to keep these in sync with actual occupancy, letting `PATCH /rooms/{id}` or `PATCH /beds/{id}` also set them directly would let staff put a room/bed into a state that lies about occupancy. Both PATCH endpoints reject those two specific values with `400`; every other status value on both resources (`MAINTENANCE`, `INACTIVE`, `VACANT`) is still a normal manual edit. See [API.md](API.md) §5.5.
+9. **Deleting a Building/Room/Tenant is blocked (`409`) while it still has active children** (rooms/beds, or an active allocation, respectively) — soft delete alone doesn't enforce this at the database level the way the documented `ON DELETE RESTRICT` semantics do for hard deletes ([DATABASE.md](DATABASE.md) §6), so the service layer enforces the equivalent by hand. Not explicitly requested by CLAUDE.md; added so "removed from active use" can't silently orphan still-active data.
 
 ## 13. Repository-to-Architecture Mapping
 

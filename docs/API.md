@@ -1,6 +1,6 @@
 # PG OS — API Specification
 
-Status: Phase 1 (Architecture) deliverable. Defines the contract Phase 3 (Backend) will implement. No endpoints exist yet — once FastAPI is running, this document should stay in sync with (or be superseded by) its auto-generated OpenAPI schema.
+Status: Phase 3a implemented — §4 (tenant self-service: `profile`, `rent` only), §5.1–§5.6 (Buildings, Rooms, Beds, Tenants, Allocations, Rent Ledger) are live under `backend/`, matching this document except where a "Phase 3a implementation note" below says otherwise. §5.7 onward (deposits, complaints, expenses, users, documents, dashboard/reports) and the rest of §4 are Phase 3b, not yet built — see [ROADMAP.md](ROADMAP.md). The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
 
 ## Deviations from CLAUDE.md's literal endpoint list
 
@@ -166,10 +166,20 @@ All endpoints under `/api/v1/tenant/*` implicitly scope to the authenticated `TE
 `POST /api/v1/allocations` request:
 
 ```json
-{ "tenant_id": "...", "room_id": "...", "bed_id": "...", "start_date": "2026-08-05" }
+{ "tenant_id": "...", "bed_id": "...", "start_date": "2026-08-05" }
 ```
 
-The service layer rejects this if the bed already has an active allocation (see [DATABASE.md](DATABASE.md) §4.6 partial unique index) — that check is a database constraint backstopped by a friendly `409 Conflict` from the service layer, not just a raw constraint-violation error.
+**Implemented in Phase 3a without `room_id` in the request body**, unlike the shape shown here in earlier drafts of this document — `room_id` is derived server-side from `bed.room_id` instead. Requiring the client to also supply `room_id` only created a way to send a value that disagrees with the bed's actual room, for no benefit; the response body still includes `room_id` (read from the bed) so clients don't lose the information.
+
+The service layer rejects the request with `409 Conflict` if the target bed's `status` is not `VACANT` — covering both "already has an active allocation" (backed by the [DATABASE.md](DATABASE.md) §4.6 partial unique index) and "bed is under `MAINTENANCE`" in one check, with a friendlier message than a raw constraint-violation error.
+
+`PATCH /api/v1/allocations/{id}/end` request (both fields optional — an empty body ends the allocation as of today):
+
+```json
+{ "end_date": "2026-08-05" }
+```
+
+Ending an allocation also flips the bed back to `VACANT` and, if the room had been `FULL`, the room back to `AVAILABLE`. Creating an allocation does the reverse (bed → `OCCUPIED`, room → `FULL` once its last vacant bed is taken). This is why `PATCH /api/v1/rooms/{id}` and `PATCH /api/v1/beds/{id}` reject `FULL`/`OCCUPIED` respectively when set directly (`400`) — those two specific values are derived from allocation state, not staff-editable; every other status value on both resources is still a normal manual edit.
 
 ### 5.6 Rent Ledger
 
@@ -265,6 +275,8 @@ The service layer rejects this if the bed already has an active allocation (see 
 | 409 | Conflict (e.g. bed already occupied, duplicate rent_ledger month) |
 | 422 | Semantically invalid request body (FastAPI/Pydantic default) |
 | 500 | Unhandled server error |
+
+**Phase 3a implementation note:** most 409s are raised deliberately by a service with a specific message (e.g. "Cannot delete a building that still has active rooms."). As a safety net, any database constraint violation a service *didn't* pre-check also becomes a 409 automatically (a generic "The request conflicts with existing data." message) rather than surfacing as a 500 — see `backend/app/main.py`'s handler for `sqlalchemy.exc.IntegrityError`.
 
 ## See Also
 

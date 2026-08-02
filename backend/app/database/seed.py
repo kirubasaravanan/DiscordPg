@@ -32,11 +32,17 @@ from app.models import (
     User,
     UserRole,
 )
+from app.security.password import hash_password
 
-# Not a real password hash — Phase 3 (Backend/Security) replaces this with
-# proper bcrypt/argon2 hashing. This value only exists so seeded users satisfy
-# the NOT NULL constraint; it will never validate against any login attempt.
-PLACEHOLDER_PASSWORD_HASH = "seed-data-placeholder-not-a-real-hash"  # noqa: S105
+# Fake, obviously-labeled dev-only credentials — real Argon2id hashes so
+# login actually works locally, but never use these outside a local/dev
+# database seeded from this script.
+SEED_PASSWORDS = {
+    UserRole.OWNER: "Owner-Dev-Pass123!",
+    UserRole.MANAGER: "Manager-Dev-Pass123!",
+    UserRole.STAFF: "Staff-Dev-Pass123!",
+    UserRole.TENANT: "Tenant-Dev-Pass123!",
+}
 
 ROOMS = [
     # (room_number, floor, capacity)
@@ -92,9 +98,9 @@ def seed(db: Session | None = None) -> None:
         db.flush()
 
         staff_users = [
-            User(email="owner@pgos.local", password_hash=PLACEHOLDER_PASSWORD_HASH, role=UserRole.OWNER),
-            User(email="manager@pgos.local", password_hash=PLACEHOLDER_PASSWORD_HASH, role=UserRole.MANAGER),
-            User(email="staff@pgos.local", password_hash=PLACEHOLDER_PASSWORD_HASH, role=UserRole.STAFF),
+            User(email="owner@pgos.local", password_hash=hash_password(SEED_PASSWORDS[UserRole.OWNER]), role=UserRole.OWNER),
+            User(email="manager@pgos.local", password_hash=hash_password(SEED_PASSWORDS[UserRole.MANAGER]), role=UserRole.MANAGER),
+            User(email="staff@pgos.local", password_hash=hash_password(SEED_PASSWORDS[UserRole.STAFF]), role=UserRole.STAFF),
         ]
         db.add_all(staff_users)
 
@@ -106,7 +112,9 @@ def seed(db: Session | None = None) -> None:
         db.flush()
 
         # Link the first tenant to a TENANT-role portal/bot account.
-        tenant_user = User(email=tenants[0].email, password_hash=PLACEHOLDER_PASSWORD_HASH, role=UserRole.TENANT)
+        tenant_user = User(
+            email=tenants[0].email, password_hash=hash_password(SEED_PASSWORDS[UserRole.TENANT]), role=UserRole.TENANT
+        )
         db.add(tenant_user)
         db.flush()
         tenants[0].user_id = tenant_user.id
@@ -216,6 +224,10 @@ def seed(db: Session | None = None) -> None:
             f"{len(tenants)} tenants, {len(staff_users) + 1} users, "
             f"{min(5, len(tenants))} allocations, {len(rent_rows)} rent ledger rows."
         )
+        print("Dev login credentials (local/dev only):")
+        for role, password in SEED_PASSWORDS.items():
+            email = tenant_user.email if role is UserRole.TENANT else f"{role.value.lower()}@pgos.local"
+            print(f"  {role.value:<8} {email:<28} {password}")
     finally:
         if owns_session:
             db.close()

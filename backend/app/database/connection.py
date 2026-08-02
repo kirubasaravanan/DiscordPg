@@ -9,7 +9,11 @@ settings = get_settings()
 
 engine = create_engine(settings.database_url, echo=settings.database_echo, pool_pre_ping=True)
 
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# autoflush=True (the default) matters here: services that modify an object
+# and then query based on that change within the same transaction (e.g.
+# allocation_service syncing Room.status from Bed occupancy) need the pending
+# UPDATE visible to the SELECT, not just at the next commit.
+SessionLocal = sessionmaker(bind=engine, autocommit=False)
 
 
 def get_db() -> Generator[Session, None, None]:

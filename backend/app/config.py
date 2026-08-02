@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     database_url: str
     database_echo: bool = False
 
+    # No default — a JWT secret must be explicit per environment, never baked in.
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:
