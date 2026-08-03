@@ -38,9 +38,20 @@ class Settings(BaseSettings):
     # Discord notification delivery (docs/ARCHITECTURE.md §9, §12) — the same
     # bot token discord_bot/ uses to receive commands also sends outbound
     # notifications via plain REST, no gateway connection needed for that.
-    # Optional: unset until Phase 6 wires actual scheduled jobs to call it.
     discord_bot_token: str | None = None
     discord_management_channel_id: str | None = None
+
+    # ai_engine/ (docs/AI_DESIGN.md §1) — the backend calls this, never
+    # Ollama directly. Timeout is generous: local LLM inference is slow,
+    # especially CPU-only.
+    ai_engine_url: str = "http://localhost:8100"
+    ai_engine_timeout_seconds: float = 30.0
+
+    # APScheduler jobs (docs/ARCHITECTURE.md §9). Off by default in the test
+    # suite (tests/backend/conftest.py sets this env var before any Settings
+    # instantiation) — a real BackgroundScheduler thread has no business
+    # starting/stopping on every one of ~170 per-test TestClient instances.
+    scheduler_enabled: bool = True
 
 
 @lru_cache

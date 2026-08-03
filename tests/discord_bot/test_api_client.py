@@ -88,6 +88,26 @@ async def test_tenant_rent_and_complaint_round_trip():
     assert any(c["id"] == created["id"] for c in complaints)
 
 
+async def test_ask_faq_reaches_the_endpoint():
+    """Doesn't assert on the AI's actual answer — ai_engine reachability
+    isn't this suite's concern (see tests/backend/test_ai_client.py, which
+    orchestrates a real ai_engine + fake-Ollama pair for that). Just
+    confirms the bot's api_client calls /tenant/faq correctly and gets
+    back either a well-shaped answer or a clean 503, never anything else.
+    """
+    discord_id = _fresh_discord_id()
+    await api_client.link(discord_id, *TENANT)
+
+    try:
+        result = await api_client.ask_faq(discord_id, "When is rent due?")
+    except api_client.APIError as exc:
+        assert exc.status_code == 503
+        return
+
+    assert isinstance(result["answer"], str)
+    assert isinstance(result["cited_sources"], list)
+
+
 async def test_non_tenant_role_gets_403_on_tenant_endpoints():
     discord_id = _fresh_discord_id()
     await api_client.link(discord_id, *STAFF)

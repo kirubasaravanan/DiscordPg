@@ -1,3 +1,7 @@
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -23,8 +27,32 @@ from app.api.routers import (
     users,
 )
 from app.config import get_settings
+from app.services import scheduled_jobs
 
-app = FastAPI(title="PG OS API", version="0.1.0")
+scheduler = BackgroundScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Disabled in the test suite (tests/backend/conftest.py sets
+    # SCHEDULER_ENABLED=false before Settings is ever instantiated) — a
+    # real background thread has no business starting/stopping on every
+    # one of ~170 per-test TestClient instances. See docs/ARCHITECTURE.md §9.
+    if get_settings().scheduler_enabled:
+        scheduler.add_job(scheduled_jobs.check_pending_rent, CronTrigger(hour=8, minute=0), id="check_pending_rent")
+        scheduler.add_job(
+            scheduled_jobs.generate_management_report, CronTrigger(hour=21, minute=0), id="generate_management_report"
+        )
+        scheduler.add_job(
+            scheduled_jobs.generate_income_report, CronTrigger(day=1, hour=9, minute=0), id="generate_income_report"
+        )
+        scheduler.start()
+    yield
+    if scheduler.running:
+        scheduler.shutdown()
+
+
+app = FastAPI(title="PG OS API", version="0.1.0", lifespan=lifespan)
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(buildings.router, prefix="/api/v1/buildings", tags=["buildings"])

@@ -23,6 +23,7 @@ from app.models.enums import (
     VerificationStatus,
 )
 from app.models.expense import Expense
+from app.models.rag_document_chunk import RagDocumentChunk
 from app.models.rent_ledger import RentLedger
 from app.models.room import Room
 from app.models.security_deposit import SecurityDeposit
@@ -43,6 +44,7 @@ __all__ = [
     "ExpenseCategory",
     "PaymentStatus",
     "Priority",
+    "RagDocumentChunk",
     "RefundStatus",
     "RentLedger",
     "Room",

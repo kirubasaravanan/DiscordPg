@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_roles
 from app.database.connection import get_db
 from app.models import UserRole
-from app.schemas.dashboard import ComplaintsReport, DashboardRead, IncomeReport, OccupancyReport
-from app.services import dashboard_service
+from app.schemas.dashboard import ComplaintsReport, DashboardRead, IncomeReport, OccupancyReport, SummaryResponse
+from app.services import dashboard_service, scheduled_jobs
 
 router = APIRouter()
 
@@ -35,3 +35,11 @@ def get_occupancy_report(db: Session = Depends(get_db)) -> OccupancyReport:
 @router.get("/reports/complaints", response_model=ComplaintsReport, dependencies=[Depends(require_roles(*REPORT_ROLES))])
 def get_complaints_report(db: Session = Depends(get_db)) -> ComplaintsReport:
     return ComplaintsReport(by_category=dashboard_service.get_complaints_report(db))
+
+
+@router.get("/reports/summary", response_model=SummaryResponse, dependencies=[Depends(require_roles(*REPORT_ROLES))])
+def get_management_summary(db: Session = Depends(get_db)) -> dict:
+    """On-demand version of the daily 21:00 job (docs/AI_DESIGN.md §4) —
+    same function, so they can never drift apart.
+    """
+    return {"summary": scheduled_jobs.build_management_summary(db)}

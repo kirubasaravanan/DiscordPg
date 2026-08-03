@@ -32,6 +32,10 @@ class Complaint(UUIDPrimaryKeyMixin, TimestampMixin, AuditUserMixin, Base):
         server_default=ComplaintStatus.OPEN.value,
     )
     resolved_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    # AI classifier output (Phase 6, docs/AI_DESIGN.md §2) — advisory only,
+    # shown to staff as context; nothing reads it to take an automated
+    # action. NULL when the classifier was unreachable/unavailable.
+    suggested_action: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="complaints")
     room: Mapped["Room | None"] = relationship(back_populates="complaints")

@@ -1,6 +1,6 @@
 # PG OS — API Specification
 
-Status: Phases 3a, 3b, 3c, and 5 all implemented — every backend endpoint in this document is live under `backend/`, with one gap noted inline (§4: `GET /api/v1/tenant/rent/{rent_id}` was never built). Documents (§5.11 and the documents portion of §4) ship with a local-filesystem storage backend by default and an R2/S3-compatible backend available via configuration — see [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 and §12. §4.1's two endpoints back `discord_bot/` (Phase 5). The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
+Status: Phases 3a, 3b, 3c, 5, and 6 all implemented — every backend endpoint in this document is live under `backend/`, with one gap noted inline (§4: `GET /api/v1/tenant/rent/{rent_id}` was never built). Documents (§5.11 and the documents portion of §4) ship with a local-filesystem storage backend by default and an R2/S3-compatible backend available via configuration — see [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 and §12. §4.1's two endpoints back `discord_bot/` (Phase 5). `POST /api/v1/tenant/faq` (§4) and `GET /api/v1/reports/summary` (§5.12) are Phase 6 — see [AI_DESIGN.md](AI_DESIGN.md). The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
 
 ## Deviations from CLAUDE.md's literal endpoint list
 
@@ -78,6 +78,7 @@ Proposed default; adjust before Phase 3 if the business rules differ.
 | Users | CRUD | – | – | – |
 | Dashboard / Reports | R | R | limited (complaints only) | – |
 | Rules | R | R | R | R |
+| FAQ (RAG) | – | – | – | own (R via question) |
 
 `C`=Create, `R`=Read, `U`=Update, `D`=Delete (soft-delete where applicable, per [DATABASE.md](DATABASE.md) §2).
 
@@ -97,6 +98,7 @@ All endpoints under `/api/v1/tenant/*` implicitly scope to the authenticated `TE
 | POST | `/api/v1/tenant/documents` | *(added)* | Confirm/register a document after uploading to the URL above. |
 | GET | `/api/v1/tenant/documents` | *(added)* | List own documents (metadata only — no `storage_url`). |
 | GET | `/api/v1/tenant/documents/{id}/download-url` | *(added — Phase 3c)* | Get a fresh pre-signed download URL for one of your own documents. |
+| POST | `/api/v1/tenant/faq` | *(added — Phase 6)* | Ask a question; answered via RAG over the PG rules/rent policy/maintenance knowledge base. |
 
 `POST /api/v1/tenant/complaints` request/response:
 
@@ -111,11 +113,31 @@ All endpoints under `/api/v1/tenant/*` implicitly scope to the authenticated `TE
   "priority": "HIGH",
   "status": "OPEN",
   "description": "My bathroom tap is leaking",
+  "suggested_action": "Send a plumber to replace the tap washer.",
   "created_at": "2026-08-02T14:30:00Z"
 }
 ```
 
-`category` and `priority` are filled in by the AI classifier server-side (see [ARCHITECTURE.md](ARCHITECTURE.md) §6.1) — the tenant never supplies them. **As of Phase 3c, that classifier still doesn't exist (Phase 6)**: `category` defaults to `OTHER` (or the tenant's own suggestion, if given), `priority` always starts `MEDIUM` — see [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 11.
+`category`, `priority`, and `suggested_action` are filled in by the AI classifier server-side (see [ARCHITECTURE.md](ARCHITECTURE.md) §6.1, [AI_DESIGN.md](AI_DESIGN.md) §2) — the tenant never supplies them directly (`category` may be *suggested*, per the request shape above). **Implemented as of Phase 6** — but every field is still validated/clamped by the service layer before persisting, and degrades to Phase 3b's original placeholder behavior (tenant's suggestion or `OTHER`, `MEDIUM` priority, no `suggested_action`) if the AI service is unreachable or returns something invalid; see [ARCHITECTURE.md](ARCHITECTURE.md) §12 item 11 and [AI_DESIGN.md](AI_DESIGN.md) §2.
+
+`POST /api/v1/tenant/faq` request/response:
+
+```json
+// Request
+{ "question": "When is rent due?" }
+
+// Response 200
+{
+  "answer": "Rent is due on the 5th of each month.",
+  "cited_sources": ["rent_policy.md"]
+}
+
+// Response 503 if the AI service is unavailable — no fallback answer is
+// fabricated; the error is honest rather than silently wrong.
+{ "error": { "code": "SERVICE_UNAVAILABLE", "message": "The FAQ assistant is temporarily unavailable. Please try again later.", "field": null } }
+```
+
+`cited_sources` lists which knowledge-base file(s) ([AI_DESIGN.md](AI_DESIGN.md) §3) the retrieved context actually came from — built from the retrieval step itself, not parsed out of the model's answer text.
 
 **Document upload flow** (Phase 3c), matching the pre-signed URL pattern from [ARCHITECTURE.md](ARCHITECTURE.md) §4.6:
 
@@ -310,6 +332,7 @@ Response shapes match the tenant-facing ones in §4 (`DocumentRead`, `DownloadUR
 | GET | `/api/v1/reports/income` | OWNER, MANAGER | `GET /reports` |
 | GET | `/api/v1/reports/occupancy` | OWNER, MANAGER | `GET /reports` |
 | GET | `/api/v1/reports/complaints` | OWNER, MANAGER | `GET /reports` |
+| GET | `/api/v1/reports/summary` | OWNER, MANAGER | *(added — Phase 6)* AI-generated management summary; on-demand version of the daily 21:00 job. |
 
 `GET /api/v1/dashboard` response shape (feeds the Streamlit dashboard's four views — occupancy, rent, complaints, expenses):
 
@@ -354,6 +377,14 @@ Response shapes match the tenant-facing ones in §4 (`DocumentRead`, `DownloadUR
   "by_category": [
     { "category": "PLUMBING", "open_count": 2, "total_count": 5 }
   ]
+}
+```
+
+`GET /api/v1/reports/summary` (Phase 6, [AI_DESIGN.md](AI_DESIGN.md) §4) — AI-narrated version of `GET /api/v1/dashboard`'s stats; falls back to a plain-text stats readout (not an error) if the AI service is unavailable, since the underlying numbers are always available regardless:
+
+```json
+{
+  "summary": "Occupancy is steady at 90%. Two rent entries are overdue and should be followed up on. One urgent complaint (WIFI) needs attention; everything else is on track."
 }
 ```
 

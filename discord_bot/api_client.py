@@ -158,3 +158,8 @@ async def file_complaint(discord_id: str, description: str) -> dict:
 async def list_own_complaints(discord_id: str) -> list[dict]:
     data = await request(discord_id, "GET", "/tenant/complaints", params={"page_size": 100})
     return data["items"]
+
+
+async def ask_faq(discord_id: str, question: str) -> dict:
+    """{"answer": str, "cited_sources": list[str]} — docs/AI_DESIGN.md §3."""
+    return await request(discord_id, "POST", "/tenant/faq", json={"question": question})

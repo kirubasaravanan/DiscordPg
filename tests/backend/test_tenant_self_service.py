@@ -86,3 +86,43 @@ def test_update_own_profile_cannot_set_status(client, tenant_with_user):
     # Pydantic's default config, not rejected; assert it had no effect rather than assuming 422.
     assert resp.status_code == 200
     assert resp.json()["status"] == "ACTIVE"
+
+
+def test_faq_returns_answer_and_citations(client, tenant_with_user, monkeypatch):
+    _, user = tenant_with_user
+    monkeypatch.setattr(
+        "app.api.routers.tenant_self.rag_service.answer_faq",
+        lambda db, question: {"answer": "Rent is due on the 5th.", "cited_sources": ["rent_policy.md"]},
+    )
+
+    resp = client.post("/api/v1/tenant/faq", json={"question": "When is rent due?"}, headers=auth_headers(user))
+
+    assert resp.status_code == 200
+    assert resp.json() == {"answer": "Rent is due on the 5th.", "cited_sources": ["rent_policy.md"]}
+
+
+def test_faq_returns_503_when_ai_service_unavailable(client, tenant_with_user, monkeypatch):
+    from app.services.ai_client import AIServiceError
+
+    _, user = tenant_with_user
+
+    def _raise(db, question):
+        raise AIServiceError("ai_engine unreachable")
+
+    monkeypatch.setattr("app.api.routers.tenant_self.rag_service.answer_faq", _raise)
+
+    resp = client.post("/api/v1/tenant/faq", json={"question": "anything"}, headers=auth_headers(user))
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+
+def test_faq_requires_tenant_role(client, staff_user):
+    resp = client.post("/api/v1/tenant/faq", json={"question": "anything"}, headers=auth_headers(staff_user))
+    assert resp.status_code == 403
+
+
+def test_faq_rejects_empty_question(client, tenant_with_user):
+    _, user = tenant_with_user
+    resp = client.post("/api/v1/tenant/faq", json={"question": ""}, headers=auth_headers(user))
+    assert resp.status_code == 422

@@ -16,12 +16,12 @@ async def _load_bot() -> commands.Bot:
     return bot
 
 
-async def test_all_five_commands_register():
+async def test_all_six_commands_register():
     bot = await _load_bot()
 
     names = {c.name for c in bot.tree.get_commands()}
 
-    assert names == {"link", "rent", "complaint", "rules", "status"}
+    assert names == {"link", "rent", "complaint", "rules", "status", "ask"}
 
 
 async def test_complaint_command_has_description_parameter():
@@ -32,6 +32,16 @@ async def test_complaint_command_has_description_parameter():
     param_names = [p.name for p in complaint_cmd.parameters]
     assert param_names == ["description"]
     assert complaint_cmd.parameters[0].required
+
+
+async def test_ask_command_has_question_parameter():
+    bot = await _load_bot()
+
+    ask_cmd = next(c for c in bot.tree.get_commands() if c.name == "ask")
+
+    param_names = [p.name for p in ask_cmd.parameters]
+    assert param_names == ["question"]
+    assert ask_cmd.parameters[0].required
 
 
 async def test_no_command_takes_extra_user_supplied_arguments():

@@ -37,6 +37,7 @@ class ComplaintRead(BaseModel):
     description: str
     priority: Priority
     status: ComplaintStatus
+    suggested_action: str | None
     resolved_at: datetime.datetime | None
     created_at: datetime.datetime
     updated_at: datetime.datetime | None

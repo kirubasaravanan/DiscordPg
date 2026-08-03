@@ -1,7 +1,27 @@
+import pytest
 from conftest import auth_headers
 
+from app.services import ai_client
 
-def test_tenant_can_file_complaint_without_category(client, tenant_with_user):
+
+@pytest.fixture
+def ai_classifier_unavailable(monkeypatch):
+    """Forces the Phase 6 classifier's unreachable-ai_engine path
+    deterministically — regardless of whatever happens to be listening on
+    AI_ENGINE_URL in this environment right now (see docs/AI_DESIGN.md §7,
+    docs/ARCHITECTURE.md §12 item 27: no live Ollama/ai_engine is assumed
+    reachable in general, but a stray dev process shouldn't make this test
+    flaky either way).
+    """
+
+    def _raise(description):
+        del description
+        raise ai_client.AIServiceError("ai_engine unreachable (forced for this test)")
+
+    monkeypatch.setattr("app.services.complaint_service.ai_client.classify_complaint", _raise)
+
+
+def test_tenant_can_file_complaint_without_category(client, tenant_with_user, ai_classifier_unavailable):
     tenant, user = tenant_with_user
     resp = client.post(
         "/api/v1/tenant/complaints", json={"description": "Bathroom tap is leaking"}, headers=auth_headers(user)
@@ -12,9 +32,10 @@ def test_tenant_can_file_complaint_without_category(client, tenant_with_user):
     assert body["priority"] == "MEDIUM"
     assert body["status"] == "OPEN"
     assert body["tenant_id"] == str(tenant.id)
+    assert body["suggested_action"] is None
 
 
-def test_tenant_can_suggest_category(client, tenant_with_user):
+def test_tenant_can_suggest_category_when_ai_unavailable(client, tenant_with_user, ai_classifier_unavailable):
     tenant, user = tenant_with_user
     resp = client.post(
         "/api/v1/tenant/complaints",
@@ -23,6 +44,84 @@ def test_tenant_can_suggest_category(client, tenant_with_user):
     )
     assert resp.status_code == 201
     assert resp.json()["category"] == "WIFI"
+
+
+def test_classifier_output_is_used_when_valid(client, tenant_with_user, monkeypatch):
+    _tenant, user = tenant_with_user
+    monkeypatch.setattr(
+        "app.services.complaint_service.ai_client.classify_complaint",
+        lambda description: {"category": "PLUMBING", "priority": "HIGH", "suggested_action": "Send a plumber."},
+    )
+
+    resp = client.post(
+        "/api/v1/tenant/complaints",
+        json={"description": "The tap is leaking", "category": "OTHER"},
+        headers=auth_headers(user),
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    # Classifier's real output wins over the tenant's own guess.
+    assert body["category"] == "PLUMBING"
+    assert body["priority"] == "HIGH"
+    assert body["suggested_action"] == "Send a plumber."
+
+
+def test_classifier_invalid_category_falls_back_to_suggestion(client, tenant_with_user, monkeypatch):
+    """A hallucinated/invalid category degrades to the tenant's own
+    suggestion (or OTHER) — the service layer clamps it, per
+    docs/ARCHITECTURE.md §5 item 5. Priority, which the model got right in
+    this response, is still honored — one bad field doesn't discard the rest.
+    """
+    _tenant, user = tenant_with_user
+    monkeypatch.setattr(
+        "app.services.complaint_service.ai_client.classify_complaint",
+        lambda description: {"category": "NOT_A_REAL_CATEGORY", "priority": "HIGH", "suggested_action": "Investigate."},
+    )
+
+    resp = client.post(
+        "/api/v1/tenant/complaints",
+        json={"description": "Something's wrong", "category": "WIFI"},
+        headers=auth_headers(user),
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["category"] == "WIFI"  # fell back to the tenant's suggestion
+    assert body["priority"] == "HIGH"  # still honored — it was valid
+    assert body["suggested_action"] == "Investigate."
+
+
+def test_classifier_invalid_priority_falls_back_to_medium(client, tenant_with_user, monkeypatch):
+    _tenant, user = tenant_with_user
+    monkeypatch.setattr(
+        "app.services.complaint_service.ai_client.classify_complaint",
+        lambda description: {"category": "PLUMBING", "priority": "CATASTROPHIC", "suggested_action": "Send someone."},
+    )
+
+    resp = client.post(
+        "/api/v1/tenant/complaints", json={"description": "The tap is leaking"}, headers=auth_headers(user)
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["category"] == "PLUMBING"
+    assert body["priority"] == "MEDIUM"  # invalid value clamped to the default
+
+
+def test_classifier_blank_suggested_action_is_stored_as_null(client, tenant_with_user, monkeypatch):
+    _tenant, user = tenant_with_user
+    monkeypatch.setattr(
+        "app.services.complaint_service.ai_client.classify_complaint",
+        lambda description: {"category": "PLUMBING", "priority": "HIGH", "suggested_action": "   "},
+    )
+
+    resp = client.post(
+        "/api/v1/tenant/complaints", json={"description": "The tap is leaking"}, headers=auth_headers(user)
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["suggested_action"] is None
 
 
 def test_tenant_complaint_unknown_room_not_found(client, tenant_with_user):

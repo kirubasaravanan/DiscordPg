@@ -1,7 +1,20 @@
 import datetime
 import os
+import socket
+import subprocess
+import sys
+import time
 import uuid
+from pathlib import Path
 
+# Must run before app.config.get_settings() is ever called (it's
+# lru_cache'd and app.database.connection imports trigger it at module
+# import time below) — a real BackgroundScheduler thread has no business
+# starting/stopping on every one of ~170 per-test TestClient instances.
+# See docs/ARCHITECTURE.md §9.
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
+
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -148,3 +161,103 @@ def tenant_with_user(db_session, make_user) -> tuple[Tenant, User]:
     db_session.add(t)
     db_session.flush()
     return t, user
+
+
+# --- Phase 6: real fake-Ollama + real ai_engine, as actual subprocesses ---
+#
+# Proves app/services/ai_client.py's HTTP contract with ai_engine/ for real,
+# completing the verified chain backend -> ai_client -> ai_engine -> Ollama
+# with only the last hop (Ollama itself) faked. See docs/AI_DESIGN.md §7.
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+AI_ENGINE_DIR = REPO_ROOT / "ai_engine"
+FAKE_OLLAMA_DIR = REPO_ROOT / "tests" / "ai_engine"
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _wait_for_health(url: str, timeout: float = 20.0) -> None:
+    deadline = time.monotonic() + timeout
+    last_exc: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            resp = httpx.get(url, timeout=1)
+            if resp.status_code == 200:
+                return
+        except httpx.HTTPError as exc:
+            last_exc = exc
+        time.sleep(0.2)
+    raise RuntimeError(f"{url} did not become healthy in time") from last_exc
+
+
+@pytest.fixture(scope="session")
+def fake_ollama_url():
+    port = _free_port()
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "--app-dir",
+            str(FAKE_OLLAMA_DIR),
+            "fake_ollama:app",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ]
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        _wait_for_health(f"{base_url}/health")
+        yield base_url
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+@pytest.fixture(scope="session")
+def ai_engine_url(fake_ollama_url):
+    port = _free_port()
+    env = os.environ.copy()
+    env["OLLAMA_HOST"] = fake_ollama_url
+    proc = subprocess.Popen(
+        ["uv", "run", "uvicorn", "main:app", "--port", str(port), "--log-level", "warning"],
+        cwd=AI_ENGINE_DIR,
+        env=env,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        _wait_for_health(f"{base_url}/health")
+        yield base_url
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+@pytest.fixture
+def configured_ai_client(ai_engine_url, monkeypatch):
+    """Points app.services.ai_client at the real (fake-Ollama-backed)
+    ai_engine subprocess for tests that opt in.
+    """
+    from app.config import Settings
+    from app.services import ai_client as ai_client_module
+
+    test_settings = Settings(ai_engine_url=ai_engine_url)
+    monkeypatch.setattr(ai_client_module, "get_settings", lambda: test_settings)
+
+
+def reset_fake_ollama(fake_ollama_url: str) -> None:
+    httpx.post(f"{fake_ollama_url}/_test/reset", timeout=5)
+
+
+def set_fake_chat_response(fake_ollama_url: str, content: str) -> None:
+    httpx.post(f"{fake_ollama_url}/_test/set_chat_response", json={"content": content}, timeout=5)
+
+
+def set_fake_embedding(fake_ollama_url: str, embedding: list[float]) -> None:
+    httpx.post(f"{fake_ollama_url}/_test/set_embedding", json={"embedding": embedding}, timeout=5)

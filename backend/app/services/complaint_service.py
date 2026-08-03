@@ -1,4 +1,5 @@
 import datetime
+import logging
 import uuid
 
 from sqlalchemy.orm import Session
@@ -6,25 +7,53 @@ from sqlalchemy.orm import Session
 from app.api.errors import not_found
 from app.models import Complaint, ComplaintCategory, ComplaintStatus, Priority
 from app.schemas.complaint import ComplaintCreate, ComplaintUpdate
+from app.services import ai_client
 from app.services.room_service import get_room
 
+logger = logging.getLogger(__name__)
 
-def _classify_placeholder(
+
+def _classify(
     description: str, suggested_category: ComplaintCategory | None
-) -> tuple[ComplaintCategory, Priority]:
-    """Stand-in for the Phase 6 AI classifier (docs/ARCHITECTURE.md §6.1,
-    §12 item 11) — that service doesn't exist yet. Until it does: use the
-    tenant's optional suggestion, or `OTHER`; priority always starts at
-    `MEDIUM` for staff to triage manually.
+) -> tuple[ComplaintCategory, Priority, str | None]:
+    """Calls the Phase 6 AI classifier (docs/AI_DESIGN.md §2) and validates
+    its output against the real enums before returning anything — the
+    classifier's output is a suggestion; this function is what actually
+    enforces it, per docs/ARCHITECTURE.md §5 item 5 ("the service layer
+    validates it against real constraints").
 
-    `description` is intentionally unused for now (it becomes the AI
-    service's input in Phase 6) — kept as a parameter so this function's
-    signature doesn't need to change when that lands, only its body.
+    Falls back to the tenant's own suggestion (or `OTHER`) and `MEDIUM`
+    priority — the exact Phase 3b placeholder behavior — on ANY failure:
+    ai_engine unreachable, a malformed response, or an invalid/hallucinated
+    enum value. Filing a complaint must never fail because the AI service
+    happens to be down.
     """
-    del description
-    category = suggested_category or ComplaintCategory.OTHER
-    priority = Priority.MEDIUM
-    return category, priority
+    fallback_category = suggested_category or ComplaintCategory.OTHER
+    fallback_priority = Priority.MEDIUM
+
+    try:
+        result = ai_client.classify_complaint(description)
+    except ai_client.AIServiceError as exc:
+        logger.warning("Complaint classifier unavailable, using fallback: %s", exc)
+        return fallback_category, fallback_priority, None
+
+    try:
+        category = ComplaintCategory(result.get("category"))
+    except ValueError:
+        logger.warning("Classifier returned an invalid category %r, using fallback", result.get("category"))
+        category = fallback_category
+
+    try:
+        priority = Priority(result.get("priority"))
+    except ValueError:
+        logger.warning("Classifier returned an invalid priority %r, using fallback", result.get("priority"))
+        priority = fallback_priority
+
+    suggested_action = result.get("suggested_action")
+    if not isinstance(suggested_action, str) or not suggested_action.strip():
+        suggested_action = None
+
+    return category, priority, suggested_action
 
 
 def list_complaints(
@@ -62,13 +91,14 @@ def get_complaint(db: Session, complaint_id: uuid.UUID) -> Complaint:
 def create_complaint(db: Session, tenant_id: uuid.UUID, payload: ComplaintCreate, actor_id: uuid.UUID) -> Complaint:
     if payload.room_id is not None:
         get_room(db, payload.room_id)  # 404s if the room doesn't exist
-    category, priority = _classify_placeholder(payload.description, payload.category)
+    category, priority, suggested_action = _classify(payload.description, payload.category)
     complaint = Complaint(
         tenant_id=tenant_id,
         room_id=payload.room_id,
         category=category,
         description=payload.description,
         priority=priority,
+        suggested_action=suggested_action,
         status=ComplaintStatus.OPEN,
         created_by=actor_id,
     )

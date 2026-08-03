@@ -5,6 +5,17 @@ live-connection concern — so this is fully real, no mocks needed.
 import formatting
 
 
+def test_faq_answer_embed_shows_answer_and_source():
+    embed = formatting.faq_answer_embed("Rent is due on the 5th.", ["rent_policy.md"])
+    assert embed.description == "Rent is due on the 5th."
+    assert "rent_policy.md" in embed.footer.text
+
+
+def test_faq_answer_embed_no_footer_when_no_sources():
+    embed = formatting.faq_answer_embed("I don't know.", [])
+    assert embed.footer.text is None
+
+
 def test_rent_embed_empty():
     embed = formatting.rent_embed([])
     assert embed.description == "No rent entries on file yet."

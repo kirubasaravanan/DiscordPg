@@ -4,15 +4,17 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import PageParams, get_current_tenant, page_params
+from app.api.errors import service_unavailable
 from app.config import get_settings
 from app.database.connection import get_db
 from app.models import Tenant
 from app.schemas.common import Page
 from app.schemas.complaint import ComplaintCreate, ComplaintRead
 from app.schemas.document import DocumentCreate, DocumentRead, DownloadURLResponse, UploadURLResponse
+from app.schemas.faq import FAQRequest, FAQResponse
 from app.schemas.rent_ledger import RentLedgerRead
 from app.schemas.tenant import TenantRead, TenantSelfUpdate
-from app.services import complaint_service, document_service, rent_ledger_service, tenant_service
+from app.services import ai_client, complaint_service, document_service, rag_service, rent_ledger_service, tenant_service
 from app.storage import StorageBackend, get_storage_backend
 
 router = APIRouter()
@@ -75,6 +77,23 @@ def list_own_complaints(
         offset=pagination.offset,
     )
     return Page(items=items, page=pagination.page, page_size=pagination.page_size, total=total)
+
+
+@router.post("/faq", response_model=FAQResponse)
+def ask_faq(
+    payload: FAQRequest,
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+) -> dict:
+    """docs/AI_DESIGN.md §3. Unlike complaint classification, there's no
+    sensible non-AI fallback for "answer this question" — if ai_engine is
+    unreachable, this surfaces a clear 503 rather than a fake answer.
+    """
+    del current_tenant  # only used for the auth/scoping check via the dependency
+    try:
+        return rag_service.answer_faq(db, payload.question)
+    except ai_client.AIServiceError as exc:
+        raise service_unavailable("The FAQ assistant is temporarily unavailable. Please try again later.") from exc
 
 
 @router.post("/documents/upload-url", response_model=UploadURLResponse)

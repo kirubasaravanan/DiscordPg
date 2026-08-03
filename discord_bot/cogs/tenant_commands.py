@@ -94,6 +94,15 @@ class TenantCommands(commands.Cog):
             return
         await interaction.response.send_message(embed=formatting.complaints_status_embed(complaints), ephemeral=True)
 
+    @app_commands.command(name="ask", description="Ask a question about PG rules, rent policy, or maintenance")
+    @app_commands.describe(question="What do you want to know?")
+    async def ask(self, interaction: discord.Interaction, question: str) -> None:
+        result = await _run(interaction, api_client.ask_faq(str(interaction.user.id), question))
+        if result is _FAILED:
+            return
+        embed = formatting.faq_answer_embed(result["answer"], result["cited_sources"])
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(TenantCommands(bot))

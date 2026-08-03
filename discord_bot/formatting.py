@@ -55,6 +55,13 @@ def rules_embed(content: str) -> discord.Embed:
     return discord.Embed(title="PG House Rules", description=content[:4096], color=discord.Color.green())
 
 
+def faq_answer_embed(answer: str, cited_sources: list[str]) -> discord.Embed:
+    embed = discord.Embed(title="PG OS FAQ", description=answer[:4096], color=discord.Color.blurple())
+    if cited_sources:
+        embed.set_footer(text="Source: " + ", ".join(cited_sources))
+    return embed
+
+
 def complaints_status_embed(complaints: list[dict]) -> discord.Embed:
     embed = discord.Embed(title="Your complaints", color=discord.Color.blurple())
     if not complaints:

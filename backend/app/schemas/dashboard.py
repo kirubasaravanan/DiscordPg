@@ -70,3 +70,12 @@ class ComplaintCategoryBreakdown(BaseModel):
 
 class ComplaintsReport(BaseModel):
     by_category: list[ComplaintCategoryBreakdown]
+
+
+class SummaryResponse(BaseModel):
+    """AI-generated management summary (docs/AI_DESIGN.md §4) — falls back
+    to a plain-text stats readout if ai_engine is unavailable, never an
+    error, since the underlying stats are always available.
+    """
+
+    summary: str

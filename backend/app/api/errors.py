@@ -32,3 +32,7 @@ def unauthorized(message: str = "Missing or invalid credentials.") -> APIError:
 
 def bad_request(message: str, field: str | None = None) -> APIError:
     return APIError(400, "VALIDATION_ERROR", message, field)
+
+
+def service_unavailable(message: str) -> APIError:
+    return APIError(503, "SERVICE_UNAVAILABLE", message)
