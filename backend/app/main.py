@@ -16,6 +16,7 @@ from app.api.routers import (
     expenses,
     rent_ledger,
     rooms,
+    rules,
     security_deposits,
     tenant_self,
     tenants,
@@ -39,6 +40,7 @@ app.include_router(complaints.router, prefix="/api/v1/complaints", tags=["compla
 app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard", "reports"])
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
 app.include_router(tenant_self.router, prefix="/api/v1/tenant", tags=["tenant-self-service"])
+app.include_router(rules.router, prefix="/api/v1/rules", tags=["rules"])
 
 if get_settings().storage_backend == "local":
     # Only meaningful with the local backend — S3/R2 clients upload/download

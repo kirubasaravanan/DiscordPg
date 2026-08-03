@@ -1,3 +1,5 @@
+from conftest import auth_headers
+
 from app.models import UserRole
 from app.security.jwt import decode_token
 
@@ -90,3 +92,58 @@ def test_logout_requires_bearer_token(client):
 def test_logout_rejects_malformed_token(client):
     resp = client.post("/api/v1/auth/logout", headers={"Authorization": "Bearer not-a-real-token"})
     assert resp.status_code == 401
+
+
+def test_link_discord_success(client, db_session, staff_user):
+    resp = client.post(
+        "/api/v1/auth/link-discord", json={"discord_id": "111122223333"}, headers=auth_headers(staff_user)
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"discord_id": "111122223333"}
+    db_session.refresh(staff_user)
+    assert staff_user.discord_id == "111122223333"
+
+
+def test_link_discord_works_for_tenant_role(client, tenant_with_user):
+    _tenant, user = tenant_with_user
+
+    resp = client.post("/api/v1/auth/link-discord", json={"discord_id": "444455556666"}, headers=auth_headers(user))
+
+    assert resp.status_code == 200
+
+
+def test_link_discord_requires_auth(client):
+    resp = client.post("/api/v1/auth/link-discord", json={"discord_id": "111122223333"})
+    assert resp.status_code == 401
+
+
+def test_link_discord_rejects_empty_id(client, staff_user):
+    resp = client.post("/api/v1/auth/link-discord", json={"discord_id": ""}, headers=auth_headers(staff_user))
+    assert resp.status_code == 422
+
+
+def test_link_discord_relinking_same_account_is_idempotent(client, staff_user):
+    first = client.post(
+        "/api/v1/auth/link-discord", json={"discord_id": "777788889999"}, headers=auth_headers(staff_user)
+    )
+    second = client.post(
+        "/api/v1/auth/link-discord", json={"discord_id": "777788889999"}, headers=auth_headers(staff_user)
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
+def test_link_discord_conflicts_when_id_already_used(client, staff_user, manager_user):
+    taken = client.post(
+        "/api/v1/auth/link-discord", json={"discord_id": "121212121212"}, headers=auth_headers(staff_user)
+    )
+    assert taken.status_code == 200
+
+    conflict = client.post(
+        "/api/v1/auth/link-discord", json={"discord_id": "121212121212"}, headers=auth_headers(manager_user)
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "CONFLICT"

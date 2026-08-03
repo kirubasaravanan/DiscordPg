@@ -66,3 +66,17 @@ def logout(db: Session, user: User) -> None:
     """
     user.token_version += 1
     db.commit()
+
+
+def link_discord(db: Session, user: User, discord_id: str) -> User:
+    """Sets the caller's own discord_id — self-service, any role.
+
+    No manual uniqueness pre-check: `users.discord_id` is already UNIQUE
+    (docs/DATABASE.md §4.1), so a collision raises IntegrityError, which
+    main.py's handler turns into a 409 — same pattern as create_user/
+    update_user in app/services/user_service.py.
+    """
+    user.discord_id = discord_id
+    db.commit()
+    db.refresh(user)
+    return user

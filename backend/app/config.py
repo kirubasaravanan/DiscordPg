@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     storage_s3_access_key_id: str | None = None
     storage_s3_secret_access_key: str | None = None
 
+    # Discord notification delivery (docs/ARCHITECTURE.md §9, §12) — the same
+    # bot token discord_bot/ uses to receive commands also sends outbound
+    # notifications via plain REST, no gateway connection needed for that.
+    # Optional: unset until Phase 6 wires actual scheduled jobs to call it.
+    discord_bot_token: str | None = None
+    discord_management_channel_id: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

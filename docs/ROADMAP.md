@@ -116,15 +116,22 @@ Built as its own `uv`-managed project under `dashboard/`, with no PostgreSQL dri
 
 **Depends on:** Phase 3 (needs the dashboard/reports and resource-listing endpoints).
 
-## Phase 5 — Discord Bot
+## Phase 5 — Discord Bot (done)
+
+No real Discord bot token exists in this environment — the same category of gap Phase 3c hit with S3/R2 credentials. Asked how to proceed; chose "build now, verify later": everything gets built for real and tested wherever testing doesn't require a live Discord connection, with the live-gateway parts clearly flagged as unverified rather than skipped or faked. See [ARCHITECTURE.md](ARCHITECTURE.md) §12 items 20–26.
 
 **Deliverables:**
-- `discord_bot/` using `discord.py`.
-- `/rent`, `/complaint`, `/rules`, `/status` commands, each calling the Phase 3 API.
-- Discord-to-PG-OS account linking via `users.discord_id` ([DATABASE.md](DATABASE.md) §4.1).
-- Notification delivery path used by the scheduled jobs ([ARCHITECTURE.md](ARCHITECTURE.md) §9).
+- `discord_bot/` — its own `uv` project, `discord.py` (slash commands only, no privileged intents), `httpx.AsyncClient` for the backend calls (async, not the dashboard's sync `requests` — this runs inside discord.py's event loop).
+- `/link`, `/rent`, `/complaint`, `/rules`, `/status` commands ([ARCHITECTURE.md](ARCHITECTURE.md) §4.1). `/link` uses a modal (email/phone + password) rather than inline command options so the password never lands in a message or command log — Discord has no native masked-input field for modals, a platform limitation, not a gap here. All responses ephemeral.
+- Discord-to-PG-OS account linking via a new self-service `POST /api/v1/auth/link-discord` ([API.md](API.md) §4.1) setting `users.discord_id` ([DATABASE.md](DATABASE.md) §4.1) — the column existed since Phase 2, but nothing before this let a user set their own.
+- `GET /api/v1/rules` ([API.md](API.md) §4.1), serving `backend/app/content/pg_rules.md` (example content, owner-editable, no code change needed) — what Phase 6's RAG will later index.
+- Per-Discord-user session store (`discord_bot/api_client.py`) — in-memory, refresh-on-401, lost on restart (re-`/link` recovers it; see §12 item 20).
+- Notification delivery mechanism (`backend/app/services/notification_service.py`) — real Discord REST calls (DM or channel message) using the bot token, independent of the interactive bot process. **Not** the scheduled jobs themselves: wiring the actual APScheduler jobs from [ARCHITECTURE.md](ARCHITECTURE.md) §9 is Phase 6's deliverable (they call the AI summary generator), this is the mechanism those jobs will call.
+- Tests: 168 backend tests (was 157 — the new endpoints + notification config validation), plus 19 new tests in `tests/discord_bot/` — the bot's entire HTTP layer against the real live backend (login, link, session refresh, all 4 tenant/rules calls, the 403-for-non-tenant-role path), embed-building (`formatting.py`, no Discord connection needed), and command-tree registration (all 5 commands' names/descriptions/parameters, confirmed with a real `discord.ext.commands.Bot` instance short of an actual gateway connection).
 
-**Definition of done:** all four commands work end-to-end against the real API for a linked test account; unlinked Discord users get a clear "link your account" response rather than an error.
+**Definition of done:** all four commands work end-to-end against the real API for a linked test account — verified as far as no live Discord connection allows (every HTTP call the commands make, for real, against the live backend); unlinked Discord users get a clear "run `/link` first" response (`api_client.NotLinkedError`), never a raw error. What's *not* independently verified: the actual Discord gateway connection, command sync landing on Discord's servers, and a live modal-submit round-trip — all three need only a real `DISCORD_BOT_TOKEN` to exercise, no code changes (§12 item 25).
+
+**Setting up a real server** (for whoever provides credentials): create an application + bot user at the [Discord Developer Portal](https://discord.com/developers/applications), invite it with the `bot` + `applications.commands` scopes and no privileged intents, copy the token into `discord_bot/.env`, and optionally set `DISCORD_GUILD_ID` to a test server's ID for instant command sync during development (unset syncs globally, which can take up to an hour to propagate). CLAUDE.md's four Discord-server roles (Owner, Manager, Maintenance, Tenant) are for the server's own channel organization — informational only from the bot's side; every command's actual authorization comes from the caller's linked PG OS account, never their Discord-side role (§12 item 26).
 
 **Depends on:** Phase 3 (tenant + complaint + rent endpoints).
 

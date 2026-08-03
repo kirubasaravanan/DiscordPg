@@ -1,0 +1,23 @@
+[project]
+name = "pgos-discord-bot"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "discord-py>=2.4",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+# Tests live in the top-level tests/ directory (docs/ARCHITECTURE.md §13
+# repo mapping), matching backend/ and dashboard/'s pyproject.toml.
+pythonpath = ["."]
+testpaths = ["../tests/discord_bot"]
+asyncio_mode = "auto"

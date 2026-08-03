@@ -22,3 +22,11 @@ class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class DiscordLinkRequest(BaseModel):
+    discord_id: str = Field(..., min_length=1, max_length=32)
+
+
+class DiscordLinkResponse(BaseModel):
+    discord_id: str

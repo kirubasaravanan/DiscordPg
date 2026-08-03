@@ -1,6 +1,6 @@
 # PG OS — API Specification
 
-Status: Phases 3a, 3b, and 3c all implemented — every backend endpoint in this document is live under `backend/`, with one gap noted inline (§4: `GET /api/v1/tenant/rent/{rent_id}` was never built). Documents (§5.11 and the documents portion of §4) ship with a local-filesystem storage backend by default and an R2/S3-compatible backend available via configuration — see [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 and §12. The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
+Status: Phases 3a, 3b, 3c, and 5 all implemented — every backend endpoint in this document is live under `backend/`, with one gap noted inline (§4: `GET /api/v1/tenant/rent/{rent_id}` was never built). Documents (§5.11 and the documents portion of §4) ship with a local-filesystem storage backend by default and an R2/S3-compatible backend available via configuration — see [ARCHITECTURE.md](ARCHITECTURE.md) §4.6 and §12. §4.1's two endpoints back `discord_bot/` (Phase 5). The live OpenAPI schema (`/openapi.json` on a running server) is the definitive reference for what's implemented; this document is curated for readability and rationale.
 
 ## Deviations from CLAUDE.md's literal endpoint list
 
@@ -39,6 +39,7 @@ Everything CLAUDE.md explicitly named is preserved below (see the "CLAUDE.md sou
 | POST | `/api/v1/auth/login` | none | Email/phone + password → access + refresh token. |
 | POST | `/api/v1/auth/refresh` | refresh token | Exchange a valid refresh token for a new access token. |
 | POST | `/api/v1/auth/logout` | access token | Invalidate the current refresh token. |
+| POST | `/api/v1/auth/link-discord` | access token | *(added — Phase 5)* Set the caller's own `discord_id`. Any role. See [§4.1](#41-shared-endpoints-any-authenticated-role). |
 
 `POST /api/v1/auth/login` request/response:
 
@@ -76,6 +77,7 @@ Proposed default; adjust before Phase 3 if the business rules differ.
 | Documents | CRUD | CRU (verify) | R | own (CR) |
 | Users | CRUD | – | – | – |
 | Dashboard / Reports | R | R | limited (complaints only) | – |
+| Rules | R | R | R | R |
 
 `C`=Create, `R`=Read, `U`=Update, `D`=Delete (soft-delete where applicable, per [DATABASE.md](DATABASE.md) §2).
 
@@ -150,6 +152,35 @@ All endpoints under `/api/v1/tenant/*` implicitly scope to the authenticated `TE
 ```
 
 `storage_url`/`storage_key` is deliberately never returned in a document's own read shape — it's an internal key, not something a client uses directly. Get a fresh, time-limited download URL from the dedicated endpoint instead.
+
+## 4.1 Shared Endpoints (any authenticated role)
+
+Added in Phase 5 for `discord_bot/`. Unlike §4, these aren't scoped to a tenant — any authenticated role can call them (see the Role Permission Matrix above).
+
+| Method | Path | CLAUDE.md source | Description |
+|---|---|---|---|
+| POST | `/api/v1/auth/link-discord` | *(added)* | Set the caller's own `discord_id` (`users.discord_id`, [DATABASE.md](DATABASE.md) §4.1). Idempotent for the same account; `409` if that Discord ID is already linked to a *different* account. |
+| GET | `/api/v1/rules` | `/rules` (Discord command) | Static PG house rules content. |
+
+`POST /api/v1/auth/link-discord` request/response:
+
+```json
+// Request
+{ "discord_id": "111122223333" }
+
+// Response 200
+{ "discord_id": "111122223333" }
+```
+
+`GET /api/v1/rules` response:
+
+```json
+{ "content": "# Sunrise PG — House Rules\n\n## Check-in / check-out\n..." }
+```
+
+Content is a single markdown string sourced from `backend/app/content/pg_rules.md` (edit the file directly — no migration or redeploy needed beyond a process restart; see `app/services/rules_service.py`). Phase 6 replaces the *source* of this content with `pgvector`-backed RAG over the same file, not the endpoint's contract.
+
+Every endpoint in this document requires Bearer auth except login/refresh (§1) — `/rules` follows that same rule rather than being a carve-out, even though its content isn't sensitive, so a Discord user must `/link` before any of the bot's four commands work, `/rules` included.
 
 ## 5. Admin APIs
 
