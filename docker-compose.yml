@@ -1,0 +1,109 @@
+# Local/dev parity for the full stack (docs/ROADMAP.md Phase 7). Production
+# uses managed services instead (docs/DEPLOYMENT.md) — Supabase Postgres,
+# Cloudflare R2, a self-hosted Ollama box, backend on Railway/a VPS — this
+# file is for `docker compose up` on a laptop or a single dev box.
+#
+# Quick start:
+#   cp .env.example .env    # fill in JWT_SECRET_KEY, POSTGRES_PASSWORD at least
+#   docker compose up -d
+#   docker compose exec ollama ollama pull qwen3:8b
+#   docker compose exec ollama ollama pull nomic-embed-text
+#   cd backend && uv run python -m app.database.seed   # optional dev seed data
+#
+# Every service also reads backend/.env, dashboard/.env, discord_bot/.env,
+# ai_engine/.env when run directly with `uv run` outside Docker (Phases
+# 2-6's normal dev workflow) — this file doesn't replace those, it's an
+# alternative way to run the same code.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pgos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-pgos}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pgos} -d ${POSTGRES_DB:-pgos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Not healthchecked — a meaningful check would mean "is a model loaded,"
+  # which compose can't know. ai_engine degrades gracefully (a 502, not a
+  # crash) if Ollama isn't ready or a model hasn't been pulled yet; see
+  # docs/AI_DESIGN.md §1.
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  ai_engine:
+    build:
+      context: ./ai_engine
+      dockerfile: ../docker/ai_engine.Dockerfile
+    env_file: .env
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    ports:
+      - "8100:8100"
+    depends_on:
+      - ollama
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pgos}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pgos}
+      AI_ENGINE_URL: http://ai_engine:8100
+      STORAGE_LOCAL_BASE_URL: http://localhost:8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage_data:/app/storage_data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai_engine:
+        condition: service_started
+    restart: on-failure
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: ../docker/dashboard.Dockerfile
+    env_file: .env
+    environment:
+      API_BASE_URL: http://backend:8000/api/v1
+    ports:
+      - "8501:8501"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # No restart policy: a missing DISCORD_BOT_TOKEN is a config problem, not
+  # a transient failure — main.py exits with a clear message (Phase 5), and
+  # that should stay visible in `docker compose ps`, not crash-loop forever.
+  discord_bot:
+    build:
+      context: ./discord_bot
+      dockerfile: ../docker/discord_bot.Dockerfile
+    env_file: .env
+    environment:
+      API_BASE_URL: http://backend:8000/api/v1
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  ollama_data:
+  storage_data:
